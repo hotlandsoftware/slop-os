@@ -12,9 +12,11 @@ Bootstrap a minimal system that:
 - RAM: 2 MB
 - Video: CGA-era text-mode expectations (currently VGA text mode in QEMU)
 
+The kernel is built with `-march=i486 -mtune=i486` so the generated code matches that CPU target even when using an `i686-elf` cross-toolchain.
+
 ## What exists right now
 - Multiboot entry stub (`kernel/boot32.asm`)
-- Freestanding C kernel shell (`kernel/kmain.c`)
+- Freestanding C kernel split into small modules under `kernel/`
 - Linker script (`linker.ld`)
 - GRUB ISO boot config (`iso/boot/grub/grub.cfg`)
 - VGA text console command loop with commands:
@@ -22,9 +24,15 @@ Bootstrap a minimal system that:
   - `clear`
   - `systeminfo` (runtime-detected RAM/CPU/kernel footprint)
   - `about` (alias of `systeminfo`)
+  - `heap` (kernel heap usage)
+  - `alloc N` (simple heap allocation test)
+  - `ls`, `cd`, `pwd`, `mkdir`, `touch`, `cat`
   - `echo TEXT`
   - `reboot`
   - `halt`
+- Early watermark heap allocator initialized from Multiboot memory info
+- Basic IDT/PIC setup with timer and keyboard IRQ handling
+- Tiny in-memory VFS for shell navigation and file inspection
 - Build and QEMU CD boot targets via `Makefile`
 - Legacy real-mode prototype retained in `boot/boot.asm` and `kernel/kernel.asm` (not used in ISO build)
 
@@ -47,10 +55,28 @@ Bootstrap a minimal system that:
 
 ## Requirements
 - `nasm`
-- `make`
+- `make` or `mingw32-make`
 - `i686-elf-gcc` and `i686-elf-ld` (or compatible freestanding 32-bit toolchain)
 - `grub-mkrescue` (plus backend tools such as `xorriso`)
 - `qemu-system-i386`
+
+## Build in WSL (recommended on Windows)
+If you are developing from Windows, the recommended build path is WSL Ubuntu with the required packages installed there.
+
+```bash
+make
+```
+
+This avoids the usual Windows friction around `grub-mkrescue` and ISO tooling.
+
+## Build on Windows
+Native Windows builds are still supported when you invoke GNU make from `cmd.exe` with the required toolchain on `PATH`.
+
+```bat
+mingw32-make
+```
+
+If you build from MSYS2, Git Bash, or WSL, plain `make` continues to work as before.
 
 ## Build ISO
 ```bash
@@ -64,12 +90,14 @@ This produces `build/slop.iso`.
 make run
 ```
 
+The default `run` target enables host-friendlier QEMU TCG pacing. To override it, pass your own `QEMU_OPTS=...`.
+
 ## Next milestones
 1. Move from bootstrap shell to protected-mode microkernel service boundaries.
 2. Split kernel responsibilities into IPC/scheduler/memory core and user-space servers.
 3. Add VFS and process manager servers.
 4. Introduce POSIX-flavored syscall compatibility over message passing.
-5. Replace polling keyboard path with interrupt-driven input.
+5. Expand the interrupt layer beyond the current timer/keyboard path.
 
 # FAQs
 
