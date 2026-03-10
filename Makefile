@@ -17,6 +17,9 @@ KERNEL_ELF := $(BUILD_DIR)/slop-kernel.elf
 KERNEL_FB_ELF := $(BUILD_DIR)/slop-kernel-fb.elf
 ISO_IMAGE := $(BUILD_DIR)/slop.iso
 ISO_FB_IMAGE := $(BUILD_DIR)/slop-fb.iso
+BOOT_BIN := $(BUILD_DIR)/boot.bin
+LEGACY_KERNEL_BIN := $(BUILD_DIR)/kernel.bin
+FLOPPY_IMAGE := $(BUILD_DIR)/slop-floppy.img
 
 CFLAGS := -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra
 LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
@@ -42,7 +45,7 @@ RM_RF = rm -rf "$1"
 COPY_FILE = cp "$1" "$2"
 endif
 
-.PHONY: all iso iso-fb run run-lowmem run-fb clean
+.PHONY: all iso iso-fb floppy run run-lowmem run-fb run-floppy run-floppy-cd clean
 
 all: iso
 
@@ -75,8 +78,20 @@ $(ISO_FB_IMAGE): $(KERNEL_FB_ELF) iso/boot/grub/grub_fb.cfg | $(BUILD_DIR)
 	$(call COPY_FILE,iso/boot/grub/grub_fb.cfg,$(ISO_ROOT)/boot/grub/grub.cfg)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_ROOT)
 
+$(BOOT_BIN): boot/boot.asm | $(BUILD_DIR)
+	$(NASM) -f bin -o $@ $<
+
+$(LEGACY_KERNEL_BIN): kernel/kernel.asm | $(BUILD_DIR)
+	$(NASM) -f bin -o $@ $<
+
+$(FLOPPY_IMAGE): $(BOOT_BIN) $(LEGACY_KERNEL_BIN) | $(BUILD_DIR)
+	dd if=/dev/zero of=$@ bs=512 count=2880
+	dd if=$(BOOT_BIN) of=$@ conv=notrunc
+	dd if=$(LEGACY_KERNEL_BIN) of=$@ bs=512 seek=1 conv=notrunc
+
 iso: $(ISO_IMAGE)
 iso-fb: $(ISO_FB_IMAGE)
+floppy: $(FLOPPY_IMAGE)
 
 run: $(ISO_IMAGE)
 	$(QEMU) $(QEMU_OPTS) $(QEMU_SERIAL_OPTS) -machine isapc -cpu 486 -m $(QEMU_RAM) -cdrom $(ISO_IMAGE) -boot d
@@ -86,6 +101,12 @@ run-lowmem: $(ISO_IMAGE)
 
 run-fb: $(ISO_FB_IMAGE)
 	$(QEMU) $(QEMU_OPTS) $(QEMU_SERIAL_OPTS) $(QEMU_VIDEO_OPTS) -machine isapc -cpu pentium2 -m 16M -cdrom $(ISO_FB_IMAGE) -boot d
+
+run-floppy: $(FLOPPY_IMAGE)
+	$(QEMU) $(QEMU_OPTS) -machine isapc -cpu 486 -m $(QEMU_RAM) -fda $(FLOPPY_IMAGE) -boot a
+
+run-floppy-cd: $(FLOPPY_IMAGE) $(ISO_IMAGE)
+	$(QEMU) $(QEMU_OPTS) -machine isapc -cpu 486 -m $(QEMU_RAM) -fda $(FLOPPY_IMAGE) -cdrom $(ISO_IMAGE) -boot a
 
 clean:
 	$(call RM_RF,$(BUILD_DIR))

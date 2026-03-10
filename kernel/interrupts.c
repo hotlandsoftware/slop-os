@@ -22,29 +22,11 @@ struct idt_ptr {
     u32 base;
 } __attribute__((packed));
 
-struct interrupt_frame {
-    u32 gs;
-    u32 fs;
-    u32 es;
-    u32 ds;
-    u32 edi;
-    u32 esi;
-    u32 ebp;
-    u32 esp;
-    u32 ebx;
-    u32 edx;
-    u32 ecx;
-    u32 eax;
-    u32 vector;
-    u32 eip;
-    u32 cs;
-    u32 eflags;
-};
-
 extern void idt_load(const struct idt_ptr *ptr);
 extern void irq0_stub(void);
 extern void irq1_stub(void);
 extern void irq_default_stub(void);
+extern void irq80_stub(void);
 
 static struct idt_entry idt[IDT_ENTRIES];
 static struct idt_ptr idtp;
@@ -123,6 +105,15 @@ static void idt_set_gate(u8 vector, void (*handler)(void)) {
     idt[vector].offset_high = (u16)((offset >> 16) & 0xFFFFu);
 }
 
+static void idt_set_gate_user(u8 vector, void (*handler)(void)) {
+    u32 offset = (u32)handler;
+    idt[vector].offset_low = (u16)(offset & 0xFFFFu);
+    idt[vector].selector = code_selector;
+    idt[vector].zero = 0;
+    idt[vector].type_attr = 0xEE;
+    idt[vector].offset_high = (u16)((offset >> 16) & 0xFFFFu);
+}
+
 static void idt_init(void) {
     u32 i;
 
@@ -134,6 +125,7 @@ static void idt_init(void) {
 
     idt_set_gate(IRQ_BASE + 0, irq0_stub);
     idt_set_gate(IRQ_BASE + 1, irq1_stub);
+    idt_set_gate_user(0x80, irq80_stub);
 
     idtp.limit = (u16)(sizeof(idt) - 1u);
     idtp.base = (u32)&idt[0];
@@ -191,6 +183,11 @@ static char decode_scancode(u8 scancode) {
 
 void interrupt_dispatch(struct interrupt_frame *frame) {
     u8 irq;
+
+    if (frame->vector == 0x80u) {
+        syscall_dispatch(frame);
+        return;
+    }
 
     if (frame->vector < IRQ_BASE || frame->vector >= IRQ_BASE + 16u) {
         return;

@@ -10,6 +10,16 @@ void outb(u16 port, u8 value) {
     __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
 }
 
+u16 inw(u16 port) {
+    u16 value;
+    __asm__ volatile ("inw %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+void outw(u16 port, u16 value) {
+    __asm__ volatile ("outw %0, %1" : : "a"(value), "Nd"(port));
+}
+
 void halt_forever(void) {
     for (;;) {
         __asm__ volatile ("cli; hlt");
@@ -160,6 +170,14 @@ void print_systeminfo(const struct multiboot_info *mbi, u32 magic) {
     } else {
         term_print("unavailable\n");
     }
+
+    term_print("  Block devices:    ");
+    term_print_u32_dec(storage_device_count());
+    term_print("\n");
+
+    term_print("  Mount entries:    ");
+    term_print_u32_dec(fs_mount_count());
+    term_print("\n");
 
     term_putchar('\n');
 }

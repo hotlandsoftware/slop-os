@@ -52,6 +52,58 @@ enum console_target {
 
 struct vfs_node;
 
+typedef int (*block_read_fn)(void *ctx, u32 lba, u32 count, void *out_buf);
+
+struct block_device {
+    int id;
+    char name[16];
+    u32 sector_size;
+    block_read_fn read;
+    void *ctx;
+};
+
+struct mount_entry {
+    int used;
+    char path[16];
+    char fs_name[16];
+    int device_id;
+};
+
+struct interrupt_frame {
+    u32 gs;
+    u32 fs;
+    u32 es;
+    u32 ds;
+    u32 edi;
+    u32 esi;
+    u32 ebp;
+    u32 esp;
+    u32 ebx;
+    u32 edx;
+    u32 ecx;
+    u32 eax;
+    u32 vector;
+    u32 eip;
+    u32 cs;
+    u32 eflags;
+};
+
+enum syscall_id {
+    SYS_READ = 0,
+    SYS_WRITE = 1,
+    SYS_OPEN = 2,
+    SYS_CLOSE = 3,
+    SYS_GETPID = 20,
+    SYS_EXIT = 60
+};
+
+struct exec_context {
+    enum console_target output;
+    struct vfs_node **cwd;
+    const struct multiboot_info *mbi;
+    u32 magic;
+};
+
 void term_init(void);
 void term_clear(void);
 void term_putchar(char c);
@@ -83,6 +135,8 @@ void mem_zero(void *dst, size_t size);
 
 u8 inb(u16 port);
 void outb(u16 port, u8 value);
+u16 inw(u16 port);
+void outw(u16 port, u16 value);
 void halt_forever(void);
 void try_reboot(void);
 void enable_interrupts(void);
@@ -102,6 +156,13 @@ int serial_try_read_char(char *out);
 
 void interrupts_init(void);
 u32 timer_ticks(void);
+void syscall_dispatch(struct interrupt_frame *frame);
+int sys_write(int fd, const char *buf, u32 len);
+int sys_read(int fd, char *buf, u32 len);
+int sys_open(const char *path, u32 flags);
+int sys_close(int fd);
+int sys_getpid(void);
+void sys_exit(int code);
 
 void heap_init(const struct multiboot_info *mbi, u32 magic);
 void *kmalloc(size_t size);
@@ -120,6 +181,24 @@ void vfs_list(struct vfs_node *cwd, const char *path, enum console_target target
 int vfs_read_file(struct vfs_node *cwd, const char *path, const char **data, u32 *size);
 int vfs_write_file(struct vfs_node *cwd, const char *path, const char *data, u32 size);
 void vfs_get_cwd_path(struct vfs_node *cwd, char *buf, size_t size);
+
+void storage_init(void);
+int storage_register_device(const char *name, u32 sector_size, block_read_fn read, void *ctx);
+const struct block_device *storage_get_device(int id);
+const struct block_device *storage_find_device(const char *name);
+u32 storage_device_count(void);
+int storage_read(int device_id, u32 lba, u32 count, void *out_buf);
+
+int atapi_probe_and_register(void);
+
+void fs_init(void);
+int fs_mount(const char *path, const char *fs_name, int device_id);
+const struct mount_entry *fs_mounts(void);
+u32 fs_mount_count(void);
+void fs_print_mounts(enum console_target target);
+
+void exec_seed_programs(void);
+int exec_run_path(const char *path, int argc, char **argv, struct exec_context *ctx);
 
 void print_systeminfo(const struct multiboot_info *mbi, u32 magic);
 void shell_loop(const struct multiboot_info *mbi, u32 magic);

@@ -13,6 +13,7 @@
 - Timer + keyboard IRQ handling. (in progress)
 - IPC primitive for user-space servers.
 - Separate optional QEMU framebuffer text console build. (in progress)
+- Storage/filesystem groundwork: block device API, thin IDE/ATAPI CD access layer, mount table, and CD/ISO placeholders. (in progress)
 
 ## Phase 2: Server split (MINIX-like direction)
 - Scheduler + low-level memory management remain in kernel.
@@ -28,3 +29,4 @@
 - Tiny libc subset.
 - Init process and `/etc/inittab`-like config.
 - POSIX-flavored syscall compatibility layer over message passing.
+- `int 0x80` syscall ABI scaffold is in place as the first compatibility step.

@@ -1,30 +1,56 @@
 #include "kernel.h"
 
+#define SHELL_INPUT_MAX 127
+#define SHELL_ARG_MAX 16
+
 struct shell_context {
     enum console_target output;
-    char input[64];
+    char input[SHELL_INPUT_MAX + 1];
     u32 len;
     struct vfs_node *cwd;
 };
+
+static const char *skip_spaces(const char *s) {
+    while (*s == ' ') {
+        ++s;
+    }
+    return s;
+}
+
+static int shell_split_args(char *line, char **argv, int max_args) {
+    int argc = 0;
+    char *p = line;
+
+    while (*p && argc < max_args) {
+        p = (char *)skip_spaces(p);
+        if (*p == '\0') {
+            break;
+        }
+        argv[argc++] = p;
+        while (*p && *p != ' ') {
+            ++p;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        *p++ = '\0';
+    }
+
+    return argc;
+}
 
 static void shell_print_help(struct shell_context *ctx) {
     console_print(ctx->output, "Commands:\n");
     console_print(ctx->output, "  help       - list commands\n");
     console_print(ctx->output, "  clear      - clear screen\n");
-    console_print(ctx->output, "  systeminfo - detected CPU/memory info\n");
-    console_print(ctx->output, "  about      - alias for systeminfo\n");
-    console_print(ctx->output, "  heap       - show kernel heap usage\n");
-    console_print(ctx->output, "  alloc N    - allocate N bytes from the kernel heap\n");
-    console_print(ctx->output, "  ls [PATH]  - list directory contents\n");
-    console_print(ctx->output, "  cd PATH    - change directory\n");
-    console_print(ctx->output, "  pwd        - print current directory\n");
-    console_print(ctx->output, "  mkdir PATH - create a directory\n");
-    console_print(ctx->output, "  touch PATH - create an empty file\n");
-    console_print(ctx->output, "  cat PATH   - print a file\n");
-    console_print(ctx->output, "  echo TEXT  - print TEXT\n");
-    console_print(ctx->output, "  echo TEXT > PATH - write TEXT to a file\n");
+    console_print(ctx->output, "  cd PATH    - change directory (shell builtin)\n");
+    console_print(ctx->output, "  alloc N    - allocate N bytes from kernel heap\n");
     console_print(ctx->output, "  reboot     - reset machine\n");
     console_print(ctx->output, "  halt       - stop CPU\n");
+    console_print(ctx->output, "Program-style commands (/bin/*):\n");
+    console_print(ctx->output, "  ls [PATH], pwd, mkdir PATH, touch PATH\n");
+    console_print(ctx->output, "  cat PATH, echo TEXT, echo TEXT > PATH\n");
+    console_print(ctx->output, "  systeminfo, mounts\n");
 }
 
 static void shell_print_heap_summary(struct shell_context *ctx) {
@@ -65,38 +91,6 @@ static void shell_handle_alloc(struct shell_context *ctx, const char *arg) {
     console_print(ctx->output, "\n");
 }
 
-static const char *skip_spaces(const char *s) {
-    while (*s == ' ') {
-        ++s;
-    }
-    return s;
-}
-
-static char *find_redirect(char *s) {
-    while (*s) {
-        if (*s == '>') {
-            return s;
-        }
-        ++s;
-    }
-    return (char *)0;
-}
-
-static void shell_handle_pwd(struct shell_context *ctx) {
-    char path[128];
-    vfs_get_cwd_path(ctx->cwd, path, sizeof(path));
-    console_printf(ctx->output, "%s\n", path);
-}
-
-static void shell_handle_ls(struct shell_context *ctx, const char *arg) {
-    arg = skip_spaces(arg);
-    if (*arg == '\0') {
-        vfs_list(ctx->cwd, (const char *)0, ctx->output);
-        return;
-    }
-    vfs_list(ctx->cwd, arg, ctx->output);
-}
-
 static void shell_handle_cd(struct shell_context *ctx, const char *arg) {
     arg = skip_spaces(arg);
     if (*arg == '\0') {
@@ -105,80 +99,6 @@ static void shell_handle_cd(struct shell_context *ctx, const char *arg) {
     }
     if (!vfs_change_dir(&ctx->cwd, arg)) {
         console_print(ctx->output, "cd: no such directory\n");
-    }
-}
-
-static void shell_handle_mkdir(struct shell_context *ctx, const char *arg) {
-    arg = skip_spaces(arg);
-    if (*arg == '\0') {
-        console_print(ctx->output, "Usage: mkdir PATH\n");
-        return;
-    }
-    if (!vfs_make_dir(ctx->cwd, arg)) {
-        console_print(ctx->output, "mkdir: failed\n");
-    }
-}
-
-static void shell_handle_touch(struct shell_context *ctx, const char *arg) {
-    arg = skip_spaces(arg);
-    if (*arg == '\0') {
-        console_print(ctx->output, "Usage: touch PATH\n");
-        return;
-    }
-    if (!vfs_touch(ctx->cwd, arg)) {
-        console_print(ctx->output, "touch: failed\n");
-    }
-}
-
-static void shell_handle_cat(struct shell_context *ctx, const char *arg) {
-    const char *data;
-    u32 size;
-
-    arg = skip_spaces(arg);
-    if (*arg == '\0') {
-        console_print(ctx->output, "Usage: cat PATH\n");
-        return;
-    }
-    if (!vfs_read_file(ctx->cwd, arg, &data, &size)) {
-        console_print(ctx->output, "cat: no such file\n");
-        return;
-    }
-    if (size > 0u && data) {
-        console_print(ctx->output, data);
-    }
-    console_putchar(ctx->output, '\n');
-}
-
-static void shell_handle_echo(struct shell_context *ctx, char *arg) {
-    char *redirect;
-
-    arg = (char *)skip_spaces(arg);
-    redirect = find_redirect(arg);
-    if (!redirect) {
-        console_print(ctx->output, arg);
-        console_putchar(ctx->output, '\n');
-        return;
-    }
-
-    *redirect = '\0';
-    ++redirect;
-    redirect = (char *)skip_spaces(redirect);
-
-    {
-        u32 len = str_len(arg);
-        while (len > 0u && arg[len - 1u] == ' ') {
-            arg[len - 1u] = '\0';
-            --len;
-        }
-
-        if (*redirect == '\0') {
-            console_print(ctx->output, "echo: missing redirect path\n");
-            return;
-        }
-
-        if (!vfs_write_file(ctx->cwd, redirect, arg, len)) {
-            console_print(ctx->output, "echo: write failed\n");
-        }
     }
 }
 
@@ -201,6 +121,75 @@ static int shell_try_get_input(enum console_target target, char *out) {
     return keyboard_try_read_char(out);
 }
 
+static int shell_run_program(struct shell_context *ctx, const struct multiboot_info *mbi, u32 magic, char *line) {
+    char *argv[SHELL_ARG_MAX];
+    char path[64];
+    struct exec_context exec_ctx;
+    int argc = shell_split_args(line, argv, SHELL_ARG_MAX);
+
+    if (argc == 0) {
+        return 1;
+    }
+
+    if (str_eq(argv[0], "about")) {
+        argv[0] = "systeminfo";
+    }
+
+    if (argv[0][0] == '/') {
+        str_copy(path, argv[0], sizeof(path));
+    } else {
+        str_copy(path, "/bin/", sizeof(path));
+        {
+            u32 base = str_len(path);
+            u32 i;
+            for (i = 0; argv[0][i] != '\0' && (base + i + 1u) < sizeof(path); ++i) {
+                path[base + i] = argv[0][i];
+                path[base + i + 1u] = '\0';
+            }
+        }
+    }
+
+    exec_ctx.output = ctx->output;
+    exec_ctx.cwd = &ctx->cwd;
+    exec_ctx.mbi = mbi;
+    exec_ctx.magic = magic;
+    return exec_run_path(path, argc, argv, &exec_ctx);
+}
+
+static void shell_execute_line(struct shell_context *ctx, const struct multiboot_info *mbi, u32 magic, char *line) {
+    char *trimmed = (char *)skip_spaces(line);
+
+    if (*trimmed == '\0') {
+        return;
+    }
+
+    if (str_eq(trimmed, "help")) {
+        shell_print_help(ctx);
+    } else if (str_eq(trimmed, "clear")) {
+        if (ctx->output == CONSOLE_VGA) {
+            term_clear();
+        } else {
+            console_print(ctx->output, "\n");
+        }
+    } else if (str_eq(trimmed, "heap")) {
+        shell_print_heap_summary(ctx);
+    } else if (str_startswith(trimmed, "alloc ")) {
+        shell_handle_alloc(ctx, trimmed + 6);
+    } else if (str_startswith(trimmed, "cd ")) {
+        shell_handle_cd(ctx, trimmed + 3);
+    } else if (str_eq(trimmed, "reboot")) {
+        term_print("Rebooting...\n");
+        try_reboot();
+    } else if (str_eq(trimmed, "halt")) {
+        term_print("CPU halted. Reset VM to continue.\n");
+        halt_forever();
+    } else {
+        if (!shell_run_program(ctx, mbi, magic, trimmed)) {
+            console_print(ctx->output, "Unknown command/program. Type \"help\".\n");
+        }
+    }
+}
+
 static void shell_process_char(struct shell_context *ctx, const struct multiboot_info *mbi, u32 magic, char c) {
     if (c == '\r') {
         c = '\n';
@@ -209,52 +198,7 @@ static void shell_process_char(struct shell_context *ctx, const struct multiboot
     if (c == '\n') {
         ctx->input[ctx->len] = '\0';
         console_putchar(ctx->output, '\n');
-
-        if (ctx->len == 0u) {
-            shell_print_prompt(ctx);
-            return;
-        }
-
-        if (str_eq(ctx->input, "help")) {
-            shell_print_help(ctx);
-        } else if (str_eq(ctx->input, "clear")) {
-            if (ctx->output == CONSOLE_VGA) {
-                term_clear();
-            } else {
-                console_print(ctx->output, "\n");
-            }
-        } else if (str_eq(ctx->input, "systeminfo") || str_eq(ctx->input, "about")) {
-            print_systeminfo(mbi, magic);
-        } else if (str_eq(ctx->input, "heap")) {
-            shell_print_heap_summary(ctx);
-        } else if (str_startswith(ctx->input, "alloc ")) {
-            shell_handle_alloc(ctx, ctx->input + 6);
-        } else if (str_eq(ctx->input, "pwd")) {
-            shell_handle_pwd(ctx);
-        } else if (str_eq(ctx->input, "ls")) {
-            shell_handle_ls(ctx, "");
-        } else if (str_startswith(ctx->input, "ls ")) {
-            shell_handle_ls(ctx, ctx->input + 3);
-        } else if (str_startswith(ctx->input, "cd ")) {
-            shell_handle_cd(ctx, ctx->input + 3);
-        } else if (str_startswith(ctx->input, "mkdir ")) {
-            shell_handle_mkdir(ctx, ctx->input + 6);
-        } else if (str_startswith(ctx->input, "touch ")) {
-            shell_handle_touch(ctx, ctx->input + 6);
-        } else if (str_startswith(ctx->input, "cat ")) {
-            shell_handle_cat(ctx, ctx->input + 4);
-        } else if (str_startswith(ctx->input, "echo ")) {
-            shell_handle_echo(ctx, ctx->input + 5);
-        } else if (str_eq(ctx->input, "reboot")) {
-            term_print("Rebooting...\n");
-            try_reboot();
-        } else if (str_eq(ctx->input, "halt")) {
-            term_print("CPU halted. Reset VM to continue.\n");
-            halt_forever();
-        } else {
-            console_print(ctx->output, "Unknown command. Type \"help\".\n");
-        }
-
+        shell_execute_line(ctx, mbi, magic, ctx->input);
         ctx->len = 0;
         shell_print_prompt(ctx);
         return;
@@ -268,7 +212,7 @@ static void shell_process_char(struct shell_context *ctx, const struct multiboot
         return;
     }
 
-    if (c >= ' ' && c <= '~' && ctx->len < (sizeof(ctx->input) - 1u)) {
+    if (c >= ' ' && c <= '~' && ctx->len < SHELL_INPUT_MAX) {
         ctx->input[ctx->len++] = c;
         console_putchar(ctx->output, c);
     }

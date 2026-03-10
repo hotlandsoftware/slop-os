@@ -5,6 +5,7 @@ global idt_load
 global irq0_stub
 global irq1_stub
 global irq_default_stub
+global irq80_stub
 
 extern interrupt_dispatch
 
@@ -22,6 +23,7 @@ idt_load:
 IRQ_STUB irq_default_stub, 0xFF
 IRQ_STUB irq0_stub, 0x20
 IRQ_STUB irq1_stub, 0x21
+IRQ_STUB irq80_stub, 0x80
 
 irq_common:
     push eax

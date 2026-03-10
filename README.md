@@ -21,19 +21,13 @@ GRUB-from-ISO in QEMU is less reliable at exactly `2 MB`, so the default `make r
 - Linker script (`linker.ld`)
 - GRUB ISO boot config (`iso/boot/grub/grub.cfg`)
 - VGA text console command loop with commands:
-  - `help`
-  - `clear`
-  - `systeminfo` (runtime-detected RAM/CPU/kernel footprint)
-  - `about` (alias of `systeminfo`)
-  - `heap` (kernel heap usage)
-  - `alloc N` (simple heap allocation test)
-  - `ls`, `cd`, `pwd`, `mkdir`, `touch`, `cat`
-  - `echo TEXT`
-  - `reboot`
-  - `halt`
+  - Shell builtins: `help`, `clear`, `cd`, `heap`, `alloc N`, `reboot`, `halt`
+  - Program-style `/bin/*` commands: `ls`, `pwd`, `mkdir`, `touch`, `cat`, `echo`, `systeminfo`, `mounts`
 - Early watermark heap allocator initialized from Multiboot memory info
 - Basic IDT/PIC setup with timer and keyboard IRQ handling
+- Early syscall ABI wired on `int 0x80` (`read`, `write`, `open`, `close`, `getpid`, `exit` stubs)
 - Tiny in-memory VFS for shell navigation and file inspection
+- Storage/filesystem groundwork: block device registry, thin IDE/ATAPI CD probe/read layer, and mount table with `memfs` + `iso9660` placeholder
 - COM1 serial logging plus a second shell context on the serial console
 - Separate QEMU-focused framebuffer build with VGA text fallback in the shared console layer
 - Build and QEMU CD boot targets via `Makefile`
@@ -96,6 +90,14 @@ make iso-fb
 
 This produces `build/slop-fb.iso`.
 
+## Build Floppy Image (legacy boot path)
+```bash
+make floppy
+```
+
+This produces `build/slop-floppy.img` (1.44 MB raw floppy image).
+It uses the standalone real-mode legacy path (`boot/boot.asm` + `kernel/kernel.asm`).
+
 ## Run in QEMU (486, 2 MB, CD boot)
 ```bash
 make run
@@ -107,6 +109,18 @@ For the exact low-memory experiment path:
 
 ```bash
 make run-lowmem
+```
+
+For floppy boot:
+
+```bash
+make run-floppy
+```
+
+To boot from floppy while also attaching the CD image:
+
+```bash
+make run-floppy-cd
 ```
 
 To expose the serial shell on COM1 in QEMU, pass a serial backend such as:
@@ -127,7 +141,7 @@ The baseline build remains 486-safe, but the default `run` target uses slightly 
 1. Move from bootstrap shell to protected-mode microkernel service boundaries.
 2. Split kernel responsibilities into IPC/scheduler/memory core and user-space servers.
 3. Add VFS and process manager servers.
-4. Introduce POSIX-flavored syscall compatibility over message passing.
+4. Expand POSIX-flavored syscall compatibility and route it over message passing.
 5. Expand the interrupt layer beyond the current timer/keyboard path.
 
 # FAQs
