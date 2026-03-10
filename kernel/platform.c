@@ -138,6 +138,17 @@ void print_systeminfo(const struct multiboot_info *mbi, u32 magic) {
     term_print_u32_dec((u32)(&_kernel_end - &_kernel_start));
     term_print(" bytes\n");
 
+    term_print("  Console backend:  ");
+    if (console_has_framebuffer()) {
+        term_print("framebuffer ");
+        term_print_u32_dec(console_width());
+        term_print("x");
+        term_print_u32_dec(console_height());
+        term_print("\n");
+    } else {
+        term_print("VGA text mode\n");
+    }
+
     term_print("  Timer ticks:      ");
     term_print_u32_dec(timer_ticks());
     term_print(" (IRQ path disabled)\n");

@@ -18,8 +18,9 @@ struct vfs_node {
     u32 size;
 };
 
-static struct vfs_node *vfs_root = (struct vfs_node *)0;
-static struct vfs_node *vfs_cwd = (struct vfs_node *)0;
+static struct vfs_node *vfs_root_node = (struct vfs_node *)0;
+
+static struct vfs_node *vfs_resolve_from(struct vfs_node *cwd, const char *path);
 
 static struct vfs_node *vfs_alloc_node(const char *name, u32 type, struct vfs_node *parent) {
     struct vfs_node *node = (struct vfs_node *)kcalloc(sizeof(struct vfs_node));
@@ -74,15 +75,19 @@ static int vfs_next_component(const char **path, char *name, size_t size) {
 }
 
 static struct vfs_node *vfs_resolve(const char *path) {
+    return vfs_resolve_from(vfs_root_node, path);
+}
+
+static struct vfs_node *vfs_resolve_from(struct vfs_node *cwd, const char *path) {
     struct vfs_node *node;
     char component[VFS_NAME_MAX + 1];
     int status;
 
     if (!path || *path == '\0') {
-        return vfs_cwd;
+        return cwd;
     }
 
-    node = (path[0] == '/') ? vfs_root : vfs_cwd;
+    node = (path[0] == '/') ? vfs_root_node : cwd;
     while (*path == '/') {
         ++path;
     }
@@ -174,7 +179,7 @@ static int vfs_write_seed_file(const char *path, const char *data) {
     char *copy;
     u32 i;
 
-    if (!vfs_touch(path)) {
+    if (!vfs_touch(vfs_root_node, path)) {
         return 0;
     }
 
@@ -198,16 +203,15 @@ static int vfs_write_seed_file(const char *path, const char *data) {
 }
 
 void vfs_init(void) {
-    if (vfs_root) {
+    if (vfs_root_node) {
         return;
     }
 
-    vfs_root = vfs_alloc_node("", VFS_NODE_DIR, (struct vfs_node *)0);
-    vfs_cwd = vfs_root;
+    vfs_root_node = vfs_alloc_node("", VFS_NODE_DIR, (struct vfs_node *)0);
 
-    vfs_make_dir("/bin");
-    vfs_make_dir("/docs");
-    vfs_make_dir("/tmp");
+    vfs_make_dir(vfs_root_node, "/bin");
+    vfs_make_dir(vfs_root_node, "/docs");
+    vfs_make_dir(vfs_root_node, "/tmp");
     vfs_write_seed_file("/docs/readme.txt",
         "SLOP in-memory VFS\n"
         "This is not a disk-backed filesystem yet.\n");
@@ -215,16 +219,20 @@ void vfs_init(void) {
         "Next: more memory management, a better VFS, and real userland.\n");
 }
 
-int vfs_change_dir(const char *path) {
-    struct vfs_node *node = vfs_resolve(path);
+struct vfs_node *vfs_root(void) {
+    return vfs_root_node;
+}
+
+int vfs_change_dir(struct vfs_node **cwd, const char *path) {
+    struct vfs_node *node = vfs_resolve_from(*cwd, path);
     if (!node || node->type != VFS_NODE_DIR) {
         return 0;
     }
-    vfs_cwd = node;
+    *cwd = node;
     return 1;
 }
 
-int vfs_make_dir(const char *path) {
+int vfs_make_dir(struct vfs_node *cwd, const char *path) {
     char parent_path[VFS_PATH_MAX];
     char name[VFS_NAME_MAX + 1];
     struct vfs_node *parent;
@@ -233,7 +241,7 @@ int vfs_make_dir(const char *path) {
         return 0;
     }
 
-    parent = (*parent_path == '\0') ? vfs_cwd : vfs_resolve(parent_path);
+    parent = (*parent_path == '\0') ? cwd : vfs_resolve_from(cwd, parent_path);
     if (!parent || parent->type != VFS_NODE_DIR || vfs_find_child(parent, name)) {
         return 0;
     }
@@ -241,7 +249,7 @@ int vfs_make_dir(const char *path) {
     return vfs_alloc_node(name, VFS_NODE_DIR, parent) != (struct vfs_node *)0;
 }
 
-int vfs_touch(const char *path) {
+int vfs_touch(struct vfs_node *cwd, const char *path) {
     char parent_path[VFS_PATH_MAX];
     char name[VFS_NAME_MAX + 1];
     struct vfs_node *parent;
@@ -251,7 +259,7 @@ int vfs_touch(const char *path) {
         return 0;
     }
 
-    parent = (*parent_path == '\0') ? vfs_cwd : vfs_resolve(parent_path);
+    parent = (*parent_path == '\0') ? cwd : vfs_resolve_from(cwd, parent_path);
     if (!parent || parent->type != VFS_NODE_DIR) {
         return 0;
     }
@@ -264,28 +272,28 @@ int vfs_touch(const char *path) {
     return vfs_alloc_node(name, VFS_NODE_FILE, parent) != (struct vfs_node *)0;
 }
 
-void vfs_list(const char *path) {
-    struct vfs_node *node = vfs_resolve(path);
+void vfs_list(struct vfs_node *cwd, const char *path, enum console_target target) {
+    struct vfs_node *node = vfs_resolve_from(cwd, path);
     struct vfs_node *child;
 
     if (!node || node->type != VFS_NODE_DIR) {
-        term_print("ls: no such directory\n");
+        console_print(target, "ls: no such directory\n");
         return;
     }
 
     child = node->first_child;
     while (child) {
         if (child->type == VFS_NODE_DIR) {
-            term_printf("%s/\n", child->name);
+            console_printf(target, "%s/\n", child->name);
         } else {
-            term_printf("%s\n", child->name);
+            console_printf(target, "%s\n", child->name);
         }
         child = child->next_sibling;
     }
 }
 
-int vfs_read_file(const char *path, const char **data, u32 *size) {
-    struct vfs_node *node = vfs_resolve(path);
+int vfs_read_file(struct vfs_node *cwd, const char *path, const char **data, u32 *size) {
+    struct vfs_node *node = vfs_resolve_from(cwd, path);
     if (!node || node->type != VFS_NODE_FILE) {
         return 0;
     }
@@ -295,24 +303,53 @@ int vfs_read_file(const char *path, const char **data, u32 *size) {
     return 1;
 }
 
-void vfs_get_cwd_path(char *buf, size_t size) {
+int vfs_write_file(struct vfs_node *cwd, const char *path, const char *data, u32 size) {
+    struct vfs_node *node;
+    char *copy;
+    u32 i;
+
+    if (!vfs_touch(cwd, path)) {
+        return 0;
+    }
+
+    node = vfs_resolve_from(cwd, path);
+    if (!node || node->type != VFS_NODE_FILE) {
+        return 0;
+    }
+
+    copy = (char *)kmalloc(size + 1u);
+    if (!copy) {
+        return 0;
+    }
+
+    for (i = 0; i < size; ++i) {
+        copy[i] = data[i];
+    }
+    copy[size] = '\0';
+
+    node->data = copy;
+    node->size = size;
+    return 1;
+}
+
+void vfs_get_cwd_path(struct vfs_node *cwd, char *buf, size_t size) {
     const char *parts[16];
     u32 count = 0;
     u32 i;
     size_t remaining = size;
     char *out = buf;
-    struct vfs_node *node = vfs_cwd;
+    struct vfs_node *node = cwd;
 
     if (size == 0u) {
         return;
     }
 
-    if (node == vfs_root) {
+    if (node == vfs_root_node) {
         str_copy(buf, "/", size);
         return;
     }
 
-    while (node && node != vfs_root && count < 16u) {
+    while (node && node != vfs_root_node && count < 16u) {
         parts[count++] = node->name;
         node = node->parent;
     }

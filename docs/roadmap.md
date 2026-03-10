@@ -12,11 +12,16 @@
 - Basic interrupt descriptor table. (in progress)
 - Timer + keyboard IRQ handling. (in progress)
 - IPC primitive for user-space servers.
+- Separate optional QEMU framebuffer text console build. (in progress)
 
 ## Phase 2: Server split (MINIX-like direction)
 - Scheduler + low-level memory management remain in kernel.
 - File system server, process manager, and driver model moved to user space.
 - Message-passing API between tasks and servers.
+
+## Graphics follow-up
+- Keep VGA text and QEMU framebuffer console as the current paths.
+- Add a future real-hardware graphics path later (VBE or comparable hardware-specific framebuffer setup).
 
 ## Phase 3: Userland
 - Minimal `/bin/sh` replacement.

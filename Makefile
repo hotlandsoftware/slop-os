@@ -4,19 +4,27 @@ LD ?= i686-elf-ld
 GRUB_MKRESCUE ?= grub-mkrescue
 QEMU ?= qemu-system-i386
 QEMU_OPTS ?= -accel tcg,thread=single -icount auto,sleep=on
+QEMU_SERIAL_OPTS ?=
+QEMU_VIDEO_OPTS ?= -vga std
+QEMU_RAM ?= 4M
+QEMU_LOW_RAM ?= 2M
 
 BUILD_DIR := build
 ISO_ROOT := $(BUILD_DIR)/isofiles
 OBJ_DIR := $(BUILD_DIR)/obj
 
 KERNEL_ELF := $(BUILD_DIR)/slop-kernel.elf
+KERNEL_FB_ELF := $(BUILD_DIR)/slop-kernel-fb.elf
 ISO_IMAGE := $(BUILD_DIR)/slop.iso
+ISO_FB_IMAGE := $(BUILD_DIR)/slop-fb.iso
 
 CFLAGS := -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra
 LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
 
-KERNEL_ASM_SRCS := kernel/boot32.asm kernel/irq_stubs.asm
+KERNEL_ASM_SRCS := kernel/irq_stubs.asm
 KERNEL_ASM_OBJ := $(patsubst kernel/%.asm,$(OBJ_DIR)/%.o,$(KERNEL_ASM_SRCS))
+BOOT_OBJ := $(OBJ_DIR)/boot32.o
+BOOT_FB_OBJ := $(OBJ_DIR)/boot32_fb.o
 KERNEL_C_SRCS := $(wildcard kernel/*.c)
 KERNEL_C_OBJ := $(patsubst kernel/%.c,$(OBJ_DIR)/%.o,$(KERNEL_C_SRCS))
 
@@ -34,7 +42,7 @@ RM_RF = rm -rf "$1"
 COPY_FILE = cp "$1" "$2"
 endif
 
-.PHONY: all iso run clean
+.PHONY: all iso iso-fb run run-lowmem run-fb clean
 
 all: iso
 
@@ -47,8 +55,11 @@ $(OBJ_DIR)/%.o: kernel/%.asm | $(OBJ_DIR)
 $(OBJ_DIR)/%.o: kernel/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(KERNEL_ELF): $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) -o $@ $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ)
+$(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) -o $@ $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ)
+
+$(KERNEL_FB_ELF): $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) -o $@ $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ)
 
 $(ISO_IMAGE): $(KERNEL_ELF) iso/boot/grub/grub.cfg | $(BUILD_DIR)
 	$(call RM_RF,$(ISO_ROOT))
@@ -57,10 +68,24 @@ $(ISO_IMAGE): $(KERNEL_ELF) iso/boot/grub/grub.cfg | $(BUILD_DIR)
 	$(call COPY_FILE,iso/boot/grub/grub.cfg,$(ISO_ROOT)/boot/grub/grub.cfg)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_ROOT)
 
+$(ISO_FB_IMAGE): $(KERNEL_FB_ELF) iso/boot/grub/grub_fb.cfg | $(BUILD_DIR)
+	$(call RM_RF,$(ISO_ROOT))
+	$(call MKDIR_P,$(ISO_ROOT)/boot/grub)
+	$(call COPY_FILE,$(KERNEL_FB_ELF),$(ISO_ROOT)/boot/slop-kernel-fb.elf)
+	$(call COPY_FILE,iso/boot/grub/grub_fb.cfg,$(ISO_ROOT)/boot/grub/grub.cfg)
+	$(GRUB_MKRESCUE) -o $@ $(ISO_ROOT)
+
 iso: $(ISO_IMAGE)
+iso-fb: $(ISO_FB_IMAGE)
 
 run: $(ISO_IMAGE)
-	$(QEMU) $(QEMU_OPTS) -machine isapc -cpu 486 -m 2M -cdrom $(ISO_IMAGE) -boot d
+	$(QEMU) $(QEMU_OPTS) $(QEMU_SERIAL_OPTS) -machine isapc -cpu 486 -m $(QEMU_RAM) -cdrom $(ISO_IMAGE) -boot d
+
+run-lowmem: $(ISO_IMAGE)
+	$(QEMU) $(QEMU_OPTS) $(QEMU_SERIAL_OPTS) -machine isapc -cpu 486 -m $(QEMU_LOW_RAM) -cdrom $(ISO_IMAGE) -boot d
+
+run-fb: $(ISO_FB_IMAGE)
+	$(QEMU) $(QEMU_OPTS) $(QEMU_SERIAL_OPTS) $(QEMU_VIDEO_OPTS) -machine isapc -cpu pentium2 -m 16M -cdrom $(ISO_FB_IMAGE) -boot d
 
 clean:
 	$(call RM_RF,$(BUILD_DIR))

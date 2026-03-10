@@ -13,6 +13,7 @@ Bootstrap a minimal system that:
 - Video: CGA-era text-mode expectations (currently VGA text mode in QEMU)
 
 The kernel is built with `-march=i486 -mtune=i486` so the generated code matches that CPU target even when using an `i686-elf` cross-toolchain.
+GRUB-from-ISO in QEMU is less reliable at exactly `2 MB`, so the default `make run` target uses a little more RAM for development while keeping a separate low-memory run target.
 
 ## What exists right now
 - Multiboot entry stub (`kernel/boot32.asm`)
@@ -33,6 +34,8 @@ The kernel is built with `-march=i486 -mtune=i486` so the generated code matches
 - Early watermark heap allocator initialized from Multiboot memory info
 - Basic IDT/PIC setup with timer and keyboard IRQ handling
 - Tiny in-memory VFS for shell navigation and file inspection
+- COM1 serial logging plus a second shell context on the serial console
+- Separate QEMU-focused framebuffer build with VGA text fallback in the shared console layer
 - Build and QEMU CD boot targets via `Makefile`
 - Legacy real-mode prototype retained in `boot/boot.asm` and `kernel/kernel.asm` (not used in ISO build)
 
@@ -85,12 +88,40 @@ make
 
 This produces `build/slop.iso`.
 
+For the framebuffer test build:
+
+```bash
+make iso-fb
+```
+
+This produces `build/slop-fb.iso`.
+
 ## Run in QEMU (486, 2 MB, CD boot)
 ```bash
 make run
 ```
 
 The default `run` target enables host-friendlier QEMU TCG pacing. To override it, pass your own `QEMU_OPTS=...`.
+
+For the exact low-memory experiment path:
+
+```bash
+make run-lowmem
+```
+
+To expose the serial shell on COM1 in QEMU, pass a serial backend such as:
+
+```bash
+make run QEMU_SERIAL_OPTS="-serial stdio"
+```
+
+For the framebuffer graphics console in QEMU:
+
+```bash
+make run-fb
+```
+
+The baseline build remains 486-safe, but the default `run` target uses slightly more RAM in QEMU because GRUB ISO boot is unreliable at exactly `2 MB`. The framebuffer path is an optional QEMU-oriented build with higher requirements; real-hardware framebuffer support remains a later roadmap item.
 
 ## Next milestones
 1. Move from bootstrap shell to protected-mode microkernel service boundaries.

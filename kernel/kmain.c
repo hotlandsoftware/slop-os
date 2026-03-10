@@ -3,7 +3,8 @@
 void kmain(u32 magic, u32 mbi_addr) {
     const struct multiboot_info *mbi = (const struct multiboot_info *)mbi_addr;
 
-    term_init();
+    term_init_with_multiboot(mbi, magic);
+    serial_init();
     term_clear();
     term_print("kmain: console ok\n");
     heap_init(mbi, magic);
