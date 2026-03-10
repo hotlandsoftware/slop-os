@@ -177,14 +177,14 @@ static int vfs_write_seed_file(const char *path, const char *data) {
     struct vfs_node *file;
     u32 size = str_len(data);
     char *copy;
-    u32 i;
 
     if (!vfs_touch(vfs_root_node, path)) {
         return 0;
     }
 
+    /* vfs_touch guarantees the node is a file; no type re-check needed. */
     file = vfs_resolve(path);
-    if (!file || file->type != VFS_NODE_FILE) {
+    if (!file) {
         return 0;
     }
 
@@ -193,10 +193,7 @@ static int vfs_write_seed_file(const char *path, const char *data) {
         return 0;
     }
 
-    for (i = 0; i < size; ++i) {
-        copy[i] = data[i];
-    }
-    copy[size] = '\0';
+    str_copy(copy, data, size + 1u);
     file->data = copy;
     file->size = size;
     return 1;
@@ -308,12 +305,16 @@ int vfs_write_file(struct vfs_node *cwd, const char *path, const char *data, u32
     char *copy;
     u32 i;
 
+    /* vfs_touch creates the file if absent and returns 0 if the path is a
+       directory or allocation fails — so a passing vfs_touch guarantees the
+       node is a file; no need to re-check the type after resolving. */
     if (!vfs_touch(cwd, path)) {
         return 0;
     }
 
+    /* Resolve once — vfs_touch already walked the path internally. */
     node = vfs_resolve_from(cwd, path);
-    if (!node || node->type != VFS_NODE_FILE) {
+    if (!node) {
         return 0;
     }
 

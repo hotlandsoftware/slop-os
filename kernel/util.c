@@ -72,7 +72,17 @@ u32 parse_u32_dec(const char *s, int *ok) {
 }
 
 void mem_zero(void *dst, size_t size) {
-    u8 *bytes = (u8 *)dst;
+    u32 *words = (u32 *)dst;
+    u8 *bytes;
+
+    /* Fast path: write 4 bytes at a time. kmalloc aligns to 16 bytes so dst
+       is always at least 4-byte aligned when called from kcalloc. */
+    while (size >= 4u) {
+        *words++ = 0u;
+        size -= 4u;
+    }
+
+    bytes = (u8 *)words;
     while (size > 0u) {
         *bytes++ = 0;
         --size;

@@ -218,11 +218,40 @@ static void put_pixel(u32 x, u32 y, u8 color) {
 }
 
 static void fb_fill_rect(u32 x, u32 y, u32 w, u32 h, u8 color) {
+    /* Pack color once outside all loops — palette lookup + shifts are expensive
+       on a 486 and the color is constant for the whole rectangle. */
+    u32 packed = fb_pack_color(color);
+    u32 bytes_pp = fb.bpp / 8u;
     u32 row;
     u32 col;
+
     for (row = 0; row < h; ++row) {
+        u32 py = y + row;
+        volatile u8 *row_ptr;
+
+        if (py >= fb.height) {
+            break;
+        }
+        /* Compute the row base pointer once per row instead of per pixel. */
+        row_ptr = fb.base + (py * fb.pitch) + (x * bytes_pp);
+
         for (col = 0; col < w; ++col) {
-            put_pixel(x + col, y + row, color);
+            volatile u8 *p;
+
+            if (x + col >= fb.width) {
+                break;
+            }
+            p = row_ptr + (col * bytes_pp);
+            if (fb.bpp == 32u) {
+                p[0] = (u8)(packed & 0xFFu);
+                p[1] = (u8)((packed >> 8) & 0xFFu);
+                p[2] = (u8)((packed >> 16) & 0xFFu);
+                p[3] = (u8)((packed >> 24) & 0xFFu);
+            } else if (fb.bpp == 24u) {
+                p[0] = (u8)(packed & 0xFFu);
+                p[1] = (u8)((packed >> 8) & 0xFFu);
+                p[2] = (u8)((packed >> 16) & 0xFFu);
+            }
         }
     }
 }
@@ -433,14 +462,23 @@ static void write_local_char(char c) {
     u32 idx;
 
     if (c == '\n') {
+        /* Erase cursor at the old position before moving it. The previous code
+           called fb_set_cursor(same, same) here which erased then immediately
+           re-drew at the same cell — net visual effect: none — and then the
+           second fb_set_cursor erased the *new* position instead, leaving a
+           ghost cursor at the old cell whenever no scroll occurred. */
         if (backend == DISPLAY_FRAMEBUFFER) {
-            fb_set_cursor(cursor_row, cursor_col);
+            if (cursor_row < text_rows && cursor_col < text_cols) {
+                fb_draw_cell(cursor_row, cursor_col, 0);
+            }
         }
         cursor_col = 0;
         ++cursor_row;
         term_scroll_if_needed();
         if (backend == DISPLAY_FRAMEBUFFER) {
-            fb_set_cursor(cursor_row, cursor_col);
+            if (cursor_row < text_rows && cursor_col < text_cols) {
+                fb_draw_cell(cursor_row, cursor_col, 1);
+            }
         } else {
             term_update_hw_cursor();
         }
@@ -449,11 +487,15 @@ static void write_local_char(char c) {
 
     if (c == '\r') {
         if (backend == DISPLAY_FRAMEBUFFER) {
-            fb_set_cursor(cursor_row, cursor_col);
+            if (cursor_row < text_rows && cursor_col < text_cols) {
+                fb_draw_cell(cursor_row, cursor_col, 0);
+            }
         }
         cursor_col = 0;
         if (backend == DISPLAY_FRAMEBUFFER) {
-            fb_set_cursor(cursor_row, cursor_col);
+            if (cursor_row < text_rows && cursor_col < text_cols) {
+                fb_draw_cell(cursor_row, cursor_col, 1);
+            }
         } else {
             term_update_hw_cursor();
         }

@@ -1,7 +1,5 @@
 #include "kernel.h"
 
-static int shift_down = 0;
-
 u8 inb(u16 port) {
     u8 value;
     __asm__ volatile ("inb %1, %0" : "=a"(value) : "Nd"(port));
