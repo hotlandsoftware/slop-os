@@ -54,11 +54,13 @@ static u8 ring3_kernel_stack[4096];
 
 volatile u32 ring3_return_esp = 0;
 volatile u32 ring3_active = 0;
+volatile u32 ring3_current_pid = 0;
 u32 ring3_kernel_stack_top = 0;
 u32 ring3_saved_ebx = 0;
 u32 ring3_saved_esi = 0;
 u32 ring3_saved_edi = 0;
 u32 ring3_saved_ebp = 0;
+u32 ring3_exit_code = 0;
 
 static void gdt_set_gate(int i, u32 base, u32 limit, u8 access, u8 gran) {
     gdt[i].base_low = (u16)(base & 0xFFFFu);

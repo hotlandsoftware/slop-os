@@ -143,6 +143,8 @@ struct proc_image {
     u32 entry;
     u32 image_base;
     u32 image_size;
+    u32 user_stack_base;
+    u32 user_stack_size;
 };
 
 void term_init(void);
@@ -209,6 +211,7 @@ int sys_close(int fd);
 int sys_getpid(void);
 void sys_exit(int code);
 int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5);
+void syscall_set_user_cwd(struct vfs_node *cwd);
 
 void tasking_init(void);
 int task_spawn_kernel(const char *name, int ppid);
@@ -228,9 +231,10 @@ const char *proc_state_name(enum proc_state state);
 u32 proc_count(void);
 int proc_bind_image(int pid, const struct proc_image *image);
 int proc_get_image(int pid, struct proc_image *image);
+int proc_reap_pid(int pid, int *exit_code);
 
-int elf_load_from_vfs(struct vfs_node *cwd, const char *path, struct proc_image *out_image, enum console_target target);
-int elf_execute_image(const struct proc_image *image, int *ret_value, enum console_target target);
+int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct proc_image *out_image, enum console_target target);
+int elf_execute_image(const struct proc_image *image, int pid, int argc, char **argv, int *ret_value, enum console_target target);
 
 void heap_init(const struct multiboot_info *mbi, u32 magic);
 void *kmalloc(size_t size);
@@ -270,5 +274,7 @@ int exec_run_path(const char *path, int argc, char **argv, struct exec_context *
 
 void print_systeminfo(const struct multiboot_info *mbi, u32 magic);
 void shell_loop(const struct multiboot_info *mbi, u32 magic);
+void kernel_panic_exception(const struct interrupt_frame *frame);
+void kernel_panic_message(const char *message);
 
 #endif

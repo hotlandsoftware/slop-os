@@ -5,8 +5,10 @@ global syscall_stub
 
 extern syscall_entry
 extern ring3_active
+extern ring3_current_pid
 extern ring3_return_esp
 extern ring3_resume_from_user
+extern ring3_exit_code
 
 ; Syscall ABI (int 0x80):
 ;   eax = syscall number
@@ -19,11 +21,22 @@ syscall_stub:
     pushad
 
     mov eax, [esp + 28]
-    cmp eax, 240
-    jne .dispatch
     cmp dword [ring3_active], 1
     jne .dispatch
+    cmp eax, 60
+    je .return_from_user_exit
+    cmp eax, 240
+    jne .dispatch
+    mov dword [ring3_exit_code], 0
+    jmp .return_to_kernel
+
+.return_from_user_exit:
+    mov ecx, [esp + 16]
+    mov [ring3_exit_code], ecx
+
+.return_to_kernel:
     mov dword [ring3_active], 0
+    mov dword [ring3_current_pid], 0
     mov esp, [ring3_return_esp]
     jmp ring3_resume_from_user
 

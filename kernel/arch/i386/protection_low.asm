@@ -15,6 +15,7 @@ extern ring3_saved_ebx
 extern ring3_saved_esi
 extern ring3_saved_edi
 extern ring3_saved_ebp
+extern ring3_exit_code
 
 gdt_flush:
     mov eax, [esp + 4]
@@ -75,7 +76,7 @@ ring3_resume_from_user:
     mov esi, [ring3_saved_esi]
     mov edi, [ring3_saved_edi]
     mov ebp, [ring3_saved_ebp]
-    mov eax, 1
+    mov eax, [ring3_exit_code]
     ret
 
 ring3_user_stub:

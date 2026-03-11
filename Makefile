@@ -1,6 +1,7 @@
 NASM ?= nasm
 CC ?= i686-elf-gcc
 LD ?= i686-elf-ld
+OBJCOPY ?= i686-elf-objcopy
 GRUB_MKRESCUE ?= grub-mkrescue
 QEMU ?= qemu-system-i386
 QEMU_OPTS ?= -accel tcg,thread=single -icount auto,sleep=on
@@ -8,10 +9,14 @@ QEMU_SERIAL_OPTS ?=
 QEMU_VIDEO_OPTS ?= -vga std
 QEMU_RAM ?= 4M
 QEMU_LOW_RAM ?= 2M
+ARCH ?= i386
 
 BUILD_DIR := build
 ISO_ROOT := $(BUILD_DIR)/isofiles
 OBJ_DIR := $(BUILD_DIR)/obj
+USER_BUILD_DIR := $(BUILD_DIR)/user
+KERNEL_DIR := kernel
+ARCH_DIR := $(KERNEL_DIR)/arch/$(ARCH)
 
 KERNEL_ELF := $(BUILD_DIR)/slop-kernel.elf
 KERNEL_FB_ELF := $(BUILD_DIR)/slop-kernel-fb.elf
@@ -21,15 +26,31 @@ BOOT_BIN := $(BUILD_DIR)/boot.bin
 LEGACY_KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 FLOPPY_IMAGE := $(BUILD_DIR)/slop-floppy.img
 
-CFLAGS := -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra
+CFLAGS := -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -I$(KERNEL_DIR)
 LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
+USER_CFLAGS := -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra
+USER_LDFLAGS := -m elf_i386 -T user/linker.ld -nostdlib
 
-KERNEL_ASM_SRCS := kernel/irq_stubs.asm kernel/syscall_stubs.asm kernel/protection_low.asm
-KERNEL_ASM_OBJ := $(patsubst kernel/%.asm,$(OBJ_DIR)/%.o,$(KERNEL_ASM_SRCS))
-BOOT_OBJ := $(OBJ_DIR)/boot32.o
-BOOT_FB_OBJ := $(OBJ_DIR)/boot32_fb.o
-KERNEL_C_SRCS := $(wildcard kernel/*.c)
-KERNEL_C_OBJ := $(patsubst kernel/%.c,$(OBJ_DIR)/%.o,$(KERNEL_C_SRCS))
+BOOT_SRC := $(ARCH_DIR)/boot32.asm
+BOOT_FB_SRC := $(ARCH_DIR)/boot32_fb.asm
+BOOT_OBJ := $(patsubst $(KERNEL_DIR)/%.asm,$(OBJ_DIR)/%.o,$(BOOT_SRC))
+BOOT_FB_OBJ := $(patsubst $(KERNEL_DIR)/%.asm,$(OBJ_DIR)/%.o,$(BOOT_FB_SRC))
+KERNEL_ASM_SRCS := $(ARCH_DIR)/irq_stubs.asm $(ARCH_DIR)/syscall_stubs.asm $(ARCH_DIR)/protection_low.asm
+KERNEL_ASM_OBJ := $(patsubst $(KERNEL_DIR)/%.asm,$(OBJ_DIR)/%.o,$(KERNEL_ASM_SRCS))
+KERNEL_GENERIC_C_SRCS := $(wildcard $(KERNEL_DIR)/*.c)
+KERNEL_ARCH_C_SRCS := $(wildcard $(ARCH_DIR)/*.c)
+KERNEL_C_SRCS := $(KERNEL_GENERIC_C_SRCS) $(KERNEL_ARCH_C_SRCS)
+KERNEL_C_OBJ := $(patsubst $(KERNEL_DIR)/%.c,$(OBJ_DIR)/%.o,$(KERNEL_C_SRCS))
+USER_CRT0_OBJ := $(USER_BUILD_DIR)/crt0.o
+USER_HELLO_OBJ := $(USER_BUILD_DIR)/hello.o
+USER_HELLO_ELF := $(USER_BUILD_DIR)/hello.elf
+USER_HELLO_BLOB_OBJ := $(OBJ_DIR)/hello_elf_blob.o
+USER_CAT_OBJ := $(USER_BUILD_DIR)/cat.o
+USER_CAT_ELF := $(USER_BUILD_DIR)/cat.elf
+USER_CAT_BLOB_OBJ := $(OBJ_DIR)/cat_elf_blob.o
+USER_TOUCH_OBJ := $(USER_BUILD_DIR)/touch.o
+USER_TOUCH_ELF := $(USER_BUILD_DIR)/touch.elf
+USER_TOUCH_BLOB_OBJ := $(OBJ_DIR)/touch_elf_blob.o
 
 ifeq ($(OS),Windows_NT)
 SHELL := cmd
@@ -49,20 +70,54 @@ endif
 
 all: iso
 
-$(BUILD_DIR) $(OBJ_DIR):
+$(BUILD_DIR) $(OBJ_DIR) $(USER_BUILD_DIR):
 	$(call MKDIR_P,$@)
 
-$(OBJ_DIR)/%.o: kernel/%.asm | $(OBJ_DIR)
+$(OBJ_DIR)/%.o: $(KERNEL_DIR)/%.asm | $(OBJ_DIR)
+	$(call MKDIR_P,$(dir $@))
 	$(NASM) -f elf32 -o $@ $<
 
-$(OBJ_DIR)/%.o: kernel/%.c | $(OBJ_DIR)
+$(OBJ_DIR)/%.o: $(KERNEL_DIR)/%.c | $(OBJ_DIR)
+	$(call MKDIR_P,$(dir $@))
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) -o $@ $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ)
+$(USER_CRT0_OBJ): user/crt0.asm | $(USER_BUILD_DIR)
+	$(NASM) -f elf32 -o $@ $<
 
-$(KERNEL_FB_ELF): $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) -o $@ $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ)
+$(USER_HELLO_OBJ): user/hello.c | $(USER_BUILD_DIR)
+	$(CC) $(USER_CFLAGS) -c -o $@ $<
+
+$(USER_HELLO_ELF): $(USER_CRT0_OBJ) $(USER_HELLO_OBJ) user/linker.ld | $(USER_BUILD_DIR)
+	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_HELLO_OBJ)
+
+$(USER_HELLO_BLOB_OBJ): $(USER_HELLO_ELF) | $(OBJ_DIR)
+	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@
+
+$(USER_CAT_OBJ): user/cat.c | $(USER_BUILD_DIR)
+	$(CC) $(USER_CFLAGS) -c -o $@ $<
+
+$(USER_CAT_ELF): $(USER_CRT0_OBJ) $(USER_CAT_OBJ) user/linker.ld | $(USER_BUILD_DIR)
+	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_CAT_OBJ)
+
+$(USER_CAT_BLOB_OBJ): $(USER_CAT_ELF) | $(OBJ_DIR)
+	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@
+
+$(USER_TOUCH_OBJ): user/touch.c | $(USER_BUILD_DIR)
+	$(CC) $(USER_CFLAGS) -c -o $@ $<
+
+$(USER_TOUCH_ELF): $(USER_CRT0_OBJ) $(USER_TOUCH_OBJ) user/linker.ld | $(USER_BUILD_DIR)
+	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_TOUCH_OBJ)
+
+$(USER_TOUCH_BLOB_OBJ): $(USER_TOUCH_ELF) | $(OBJ_DIR)
+	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@
+
+USER_BLOB_OBJ := $(USER_HELLO_BLOB_OBJ) $(USER_CAT_BLOB_OBJ) $(USER_TOUCH_BLOB_OBJ)
+
+$(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) $(USER_BLOB_OBJ) linker.ld | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) -o $@ $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) $(USER_BLOB_OBJ)
+
+$(KERNEL_FB_ELF): $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) $(USER_BLOB_OBJ) linker.ld | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) -o $@ $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) $(USER_BLOB_OBJ)
 
 $(ISO_IMAGE): $(KERNEL_ELF) iso/boot/grub/grub.cfg | $(BUILD_DIR)
 	$(call RM_RF,$(ISO_ROOT))

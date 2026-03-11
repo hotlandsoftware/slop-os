@@ -36,3 +36,15 @@ Currently, we are in the "very early" development phase.
 - Added kernel-owned GDT/TSS protection setup and an `iret`-based Ring 3 transition test path.
 - Added `ring3test` command that enters CPL3, performs syscall interaction, and returns to kernel control.
 - Added kernel panics.
+
+### Day 4
+- Added a red-screen kernel panic renderer. Exception panics now show structured details (vector/error/EIP/CS/EFLAGS) on the red screen.
+- Added `panic` shell command to trigger a kernel panic for testing.
+- Added a real userland build path (`user/crt0.asm`, `user/hello.c`, `user/linker.ld`) that produces `build/user/hello.elf`.
+- Kernel now links and seeds `/bin/hello.elf` from the built ELF blob instead of hardcoded bytes.
+- `run /bin/hello.elf` now executes in Ring 3 and returns to shell via `SYS_EXIT` with an exit status.
+- Added syscall hardening for Ring 3 user pointers (image/stack range checks, errno-style failures).
+- Reworked ELF execution storage from one global buffer to per-process image/stack slots.
+- Added argument passing from kernel to user entry (`argc/argv`) on the Ring 3 user stack.
+- Real binaries are now a thing! (``touch`` and ``cat``)
+- i386 source has been split to better support future architectures.

@@ -2,6 +2,7 @@
 
 #define SHELL_INPUT_MAX 127
 #define SHELL_ARG_MAX 16
+#define SHELL_ECHO_MAX 128
 
 struct shell_context {
     enum console_target output;
@@ -63,11 +64,14 @@ static void shell_print_help(struct shell_context *ctx) {
     console_print(ctx->output, "  clear      - clear screen\n");
     console_print(ctx->output, "  cd PATH    - change directory (shell builtin)\n");
     console_print(ctx->output, "  alloc N    - allocate N bytes from kernel heap\n");
+    console_print(ctx->output, "  panic      - trigger kernel panic screen\n");
     console_print(ctx->output, "  reboot     - reset machine\n");
     console_print(ctx->output, "  halt       - stop CPU\n");
     console_print(ctx->output, "Program-style commands (/bin/*):\n");
     console_print(ctx->output, "  ls [PATH], pwd, mkdir PATH, touch PATH\n");
-    console_print(ctx->output, "  cat PATH, echo TEXT, echo TEXT > PATH\n");
+    console_print(ctx->output, "  cat PATH\n");
+    console_print(ctx->output, "Shell builtins:\n");
+    console_print(ctx->output, "  echo TEXT, echo TEXT > PATH\n");
     console_print(ctx->output, "  systeminfo, mounts, ps, run PATH, ring3test\n");
 }
 
@@ -118,6 +122,70 @@ static void shell_handle_cd(struct shell_context *ctx, const char *arg) {
     if (!vfs_change_dir(&ctx->cwd, arg)) {
         console_print(ctx->output, "cd: no such directory\n");
     }
+}
+
+static void shell_handle_echo(struct shell_context *ctx, char *line) {
+    char *argv[SHELL_ARG_MAX];
+    char out[SHELL_ECHO_MAX];
+    u32 used = 0;
+    int argc;
+    int i;
+    int redir = -1;
+
+    argc = shell_split_args(line, argv, SHELL_ARG_MAX);
+    if (argc < 2) {
+        console_putchar(ctx->output, '\n');
+        return;
+    }
+
+    for (i = 1; i < argc; ++i) {
+        if (str_eq(argv[i], ">")) {
+            redir = i;
+            break;
+        }
+    }
+
+    if (redir == 1) {
+        console_print(ctx->output, "echo: missing text\n");
+        return;
+    }
+    if (redir >= 0 && redir + 1 >= argc) {
+        console_print(ctx->output, "echo: missing redirect path\n");
+        return;
+    }
+
+    out[0] = '\0';
+    for (i = 1; i < argc; ++i) {
+        u32 j;
+        const char *part = argv[i];
+        if (i == redir) {
+            break;
+        }
+        if (used != 0u) {
+            if (used + 1u >= sizeof(out)) {
+                break;
+            }
+            out[used++] = ' ';
+            out[used] = '\0';
+        }
+        for (j = 0; part[j] != '\0'; ++j) {
+            if (used + 1u >= sizeof(out)) {
+                break;
+            }
+            out[used++] = part[j];
+            out[used] = '\0';
+        }
+    }
+
+    if (redir >= 0) {
+        if (!vfs_write_file(ctx->cwd, argv[redir + 1], out, used)) {
+            console_print(ctx->output, "echo: write failed\n");
+        }
+        return;
+    }
+
+    console_print(ctx->output, out);
+    console_putchar(ctx->output, '\n');
 }
 
 static void shell_print_prompt(struct shell_context *ctx) {
@@ -195,12 +263,16 @@ static void shell_execute_line(struct shell_context *ctx, const struct multiboot
         shell_handle_alloc(ctx, trimmed + 6);
     } else if (str_startswith(trimmed, "cd ")) {
         shell_handle_cd(ctx, trimmed + 3);
+    } else if (str_eq(trimmed, "panic")) {
+        kernel_panic_message("triggered from shell");
     } else if (str_eq(trimmed, "reboot")) {
         term_print("Rebooting...\n");
         try_reboot();
     } else if (str_eq(trimmed, "halt")) {
         term_print("CPU halted. Reset VM to continue.\n");
         halt_forever();
+    } else if (str_eq(trimmed, "echo") || str_startswith(trimmed, "echo ")) {
+        shell_handle_echo(ctx, trimmed);
     } else {
         if (!shell_run_program(ctx, mbi, magic, trimmed)) {
             console_print(ctx->output, "Unknown command/program. Type \"help\".\n");

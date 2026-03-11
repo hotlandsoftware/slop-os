@@ -41,6 +41,8 @@ void proc_init(void) {
         images[i].entry = 0;
         images[i].image_base = 0;
         images[i].image_size = 0;
+        images[i].user_stack_base = 0;
+        images[i].user_stack_size = 0;
     }
 
     used = 0;
@@ -72,6 +74,8 @@ int proc_spawn_kernel(const char *name, int ppid) {
     images[slot].entry = 0;
     images[slot].image_base = 0;
     images[slot].image_size = 0;
+    images[slot].user_stack_base = 0;
+    images[slot].user_stack_size = 0;
     ++used;
     return procs[slot].pid;
 }
@@ -105,6 +109,8 @@ int proc_wait(int ppid, int *child_pid, int *exit_code) {
             images[i].entry = 0;
             images[i].image_base = 0;
             images[i].image_size = 0;
+            images[i].user_stack_base = 0;
+            images[i].user_stack_size = 0;
             if (used > 0u) {
                 --used;
             }
@@ -165,5 +171,32 @@ int proc_get_image(int pid, struct proc_image *image) {
         return 0;
     }
     *image = images[slot];
+    return 1;
+}
+
+int proc_reap_pid(int pid, int *exit_code) {
+    int slot = find_slot_by_pid(pid);
+    if (slot < 0 || procs[slot].state != PROC_ZOMBIE) {
+        return 0;
+    }
+
+    if (exit_code) {
+        *exit_code = procs[slot].exit_code;
+    }
+
+    procs[slot].pid = -1;
+    procs[slot].ppid = -1;
+    procs[slot].state = PROC_UNUSED;
+    procs[slot].exit_code = 0;
+    procs[slot].name[0] = '\0';
+    images[slot].loaded = 0;
+    images[slot].entry = 0;
+    images[slot].image_base = 0;
+    images[slot].image_size = 0;
+    images[slot].user_stack_base = 0;
+    images[slot].user_stack_size = 0;
+    if (used > 0u) {
+        --used;
+    }
     return 1;
 }

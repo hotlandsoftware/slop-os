@@ -1,38 +1,178 @@
 #include "kernel.h"
 
 #define SYSCALL_WRITE_MAX 1024u
-#define SYSCALL_RET_KERNEL_MAGIC ((int)0x534C4F50)
+#define ERR_BADF (-9)
+#define ERR_FAULT (-14)
+#define ERR_INVAL (-22)
+#define ERR_NFILE (-24)
+
+extern volatile u32 ring3_active;
+extern volatile u32 ring3_current_pid;
+
+struct fd_entry {
+    int used;
+    int pid;
+    const char *data;
+    u32 size;
+    u32 offset;
+};
+
+static struct fd_entry fd_table[16];
+static struct vfs_node *user_cwd = (struct vfs_node *)0;
+
+void syscall_set_user_cwd(struct vfs_node *cwd) {
+    user_cwd = cwd;
+}
+
+static int range_contains(u32 base, u32 size, u32 ptr, u32 len) {
+    u32 end;
+    if (size == 0u) {
+        return 0;
+    }
+    if (ptr < base) {
+        return 0;
+    }
+    if (len == 0u) {
+        return ptr < (base + size);
+    }
+    end = ptr + len;
+    if (end < ptr) {
+        return 0;
+    }
+    return end <= (base + size);
+}
+
+static int validate_user_ptr(const void *ptr, u32 len) {
+    struct proc_image image;
+    u32 p = (u32)ptr;
+    int pid;
+
+    if (ring3_active == 0u) {
+        return 1;
+    }
+
+    pid = (int)ring3_current_pid;
+    if (pid <= 0 || !proc_get_image(pid, &image) || !image.loaded) {
+        return 0;
+    }
+
+    if (range_contains(image.image_base, image.image_size, p, len)) {
+        return 1;
+    }
+    if (range_contains(image.user_stack_base, image.user_stack_size, p, len)) {
+        return 1;
+    }
+    return 0;
+}
+
+static int copy_user_cstr(const char *user_ptr, char *dst, u32 dst_size) {
+    u32 i = 0;
+    if (!user_ptr || !dst || dst_size == 0u) {
+        return 0;
+    }
+
+    for (i = 0; i < (dst_size - 1u); ++i) {
+        char c;
+        if (!validate_user_ptr(user_ptr + i, 1u)) {
+            return 0;
+        }
+        c = user_ptr[i];
+        dst[i] = c;
+        if (c == '\0') {
+            return 1;
+        }
+    }
+
+    dst[dst_size - 1u] = '\0';
+    return 1;
+}
+
+static int fd_alloc_slot(void) {
+    u32 i;
+    for (i = 3u; i < (sizeof(fd_table) / sizeof(fd_table[0])); ++i) {
+        if (!fd_table[i].used) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int fd_lookup(int fd, int pid) {
+    if (fd < 3 || (u32)fd >= (sizeof(fd_table) / sizeof(fd_table[0]))) {
+        return -1;
+    }
+    if (!fd_table[fd].used || fd_table[fd].pid != pid) {
+        return -1;
+    }
+    return fd;
+}
 
 static int ksys_read(int fd, char *buf, u32 len) {
     u32 i;
     char c;
+    int pid = (int)ring3_current_pid;
+    int slot;
 
     if (fd != 0 || !buf) {
-        return -1;
-    }
-
-    for (i = 0; i < len; ++i) {
-        while (!keyboard_try_read_char(&c)) {
-            cpu_relax_wait();
-        }
-        buf[i] = c;
-        if (c == '\n') {
-            return (int)(i + 1u);
+        if (fd != 0 || !buf) {
+            if (fd == 0) {
+                return ERR_FAULT;
+            }
         }
     }
 
-    return (int)len;
+    if (fd == 0) {
+        if (!validate_user_ptr(buf, len == 0u ? 1u : len)) {
+            return ERR_FAULT;
+        }
+
+        for (i = 0; i < len; ++i) {
+            while (!keyboard_try_read_char(&c)) {
+                cpu_relax_wait();
+            }
+            buf[i] = c;
+            if (c == '\n') {
+                return (int)(i + 1u);
+            }
+        }
+
+        return (int)len;
+    }
+
+    if (!validate_user_ptr(buf, len == 0u ? 1u : len)) {
+        return ERR_FAULT;
+    }
+
+    slot = fd_lookup(fd, pid);
+    if (slot < 0) {
+        return ERR_BADF;
+    }
+
+    if (fd_table[slot].offset >= fd_table[slot].size) {
+        return 0;
+    }
+
+    i = 0;
+    while (i < len && fd_table[slot].offset < fd_table[slot].size) {
+        buf[i++] = fd_table[slot].data[fd_table[slot].offset++];
+    }
+
+    return (int)i;
 }
 
 static int ksys_write(int fd, const char *buf, u32 len) {
     u32 i;
 
     if ((fd != 1 && fd != 2) || !buf) {
-        return -1;
+        return ERR_BADF;
     }
 
     if (len > SYSCALL_WRITE_MAX) {
         len = SYSCALL_WRITE_MAX;
+    }
+
+    if (!validate_user_ptr(buf, len == 0u ? 1u : len)) {
+        return ERR_FAULT;
     }
 
     for (i = 0; i < len; ++i) {
@@ -43,17 +183,60 @@ static int ksys_write(int fd, const char *buf, u32 len) {
 }
 
 static int ksys_open(const char *path, u32 flags) {
-    (void)path;
-    (void)flags;
-    return -1;
+    char kpath[128];
+    const char *data;
+    u32 size = 0;
+    int pid = (int)ring3_current_pid;
+    int slot;
+
+    if (!path) {
+        return ERR_INVAL;
+    }
+    if (!copy_user_cstr(path, kpath, sizeof(kpath))) {
+        return ERR_FAULT;
+    }
+
+    if ((flags & 0x40u) != 0u) {
+        if (!vfs_touch(user_cwd ? user_cwd : vfs_root(), kpath)) {
+            return ERR_INVAL;
+        }
+    }
+
+    if (!vfs_read_file(user_cwd ? user_cwd : vfs_root(), kpath, &data, &size)) {
+        return ERR_INVAL;
+    }
+
+    slot = fd_alloc_slot();
+    if (slot < 0) {
+        return ERR_NFILE;
+    }
+
+    fd_table[slot].used = 1;
+    fd_table[slot].pid = pid;
+    fd_table[slot].data = data;
+    fd_table[slot].size = size;
+    fd_table[slot].offset = 0;
+    return slot;
 }
 
 static int ksys_close(int fd) {
-    (void)fd;
-    return -1;
+    int pid = (int)ring3_current_pid;
+    int slot = fd_lookup(fd, pid);
+    if (slot < 0) {
+        return ERR_BADF;
+    }
+    fd_table[slot].used = 0;
+    fd_table[slot].pid = -1;
+    fd_table[slot].data = (const char *)0;
+    fd_table[slot].size = 0u;
+    fd_table[slot].offset = 0u;
+    return 0;
 }
 
 static int ksys_getpid(void) {
+    if (ring3_active != 0u && ring3_current_pid > 0u) {
+        return (int)ring3_current_pid;
+    }
     return task_current_pid();
 }
 
@@ -62,7 +245,21 @@ static void ksys_exit(int code) {
     if (pid > 0) {
         (void)proc_exit(pid, code);
     }
-    console_printf(CONSOLE_BOTH, "process %d exited with code %d\n", pid, code);
+    console_print(CONSOLE_BOTH, "process ");
+    if (pid < 0) {
+        console_print(CONSOLE_BOTH, "-");
+        console_print_u32_dec(CONSOLE_BOTH, (u32)(-pid));
+    } else {
+        console_print_u32_dec(CONSOLE_BOTH, (u32)pid);
+    }
+    console_print(CONSOLE_BOTH, " exited with code ");
+    if (code < 0) {
+        console_print(CONSOLE_BOTH, "-");
+        console_print_u32_dec(CONSOLE_BOTH, (u32)(-code));
+    } else {
+        console_print_u32_dec(CONSOLE_BOTH, (u32)code);
+    }
+    console_putchar(CONSOLE_BOTH, '\n');
 }
 
 int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5) {
@@ -91,7 +288,7 @@ int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5) {
             ret = 0;
             break;
         case SYS_RET_KERNEL:
-            ret = SYSCALL_RET_KERNEL_MAGIC;
+            ret = 0;
             break;
         default:
             ret = -1;

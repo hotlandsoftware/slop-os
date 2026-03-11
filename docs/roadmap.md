@@ -2,7 +2,7 @@
 
 ## Phase 0: Bootstrap (done)
 - GRUB loads a multiboot ELF kernel from ISO.
-- Assembly is reduced to boot/entry glue (`kernel/boot32.asm`).
+- Assembly is reduced to boot/entry glue (`kernel/arch/i386/boot32.asm`).
 - Kernel shell is in freestanding C with VGA text output and interrupt-driven keyboard input.
 - Tested profile target remains 486 / 2 MB.
 
@@ -34,3 +34,5 @@
 - POSIX-flavored syscall compatibility layer over message passing.
 - `int 0x80` syscall ABI scaffold is in place as the first compatibility step, with a dedicated syscall entry stub separated from IRQ stubs.
 - Early ELF32 loader path validates `ET_EXEC`/`EM_386` and maps `PT_LOAD` segments into a controlled user-image region.
+- Userland build path now produces a real `/bin/hello.elf` from `user/` sources as the first non-embedded program flow.
+- Syscalls now include basic user-pointer validation and per-process user image/stack slots for execution context.

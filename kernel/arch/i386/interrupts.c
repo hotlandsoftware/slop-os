@@ -191,19 +191,7 @@ void interrupt_dispatch(struct interrupt_frame *frame) {
     u8 irq;
 
     if (frame->vector < 32u) {
-        term_print("\nKERNEL EXCEPTION\n");
-        term_print("  vector: ");
-        term_print_u32_dec(frame->vector);
-        term_print("\n  error:  ");
-        term_print_hex_u32(frame->error_code);
-        term_print("\n  eip:    ");
-        term_print_hex_u32(frame->eip);
-        term_print("\n  cs:     ");
-        term_print_hex_u32(frame->cs);
-        term_print("\n  eflags: ");
-        term_print_hex_u32(frame->eflags);
-        term_print("\n");
-        halt_forever();
+        kernel_panic_exception(frame);
     }
 
     if (frame->vector < IRQ_BASE || frame->vector >= IRQ_BASE + 16u) {

@@ -11,6 +11,9 @@
 #define ET_EXEC 2u
 #define EM_386 3u
 #define PT_LOAD 1u
+#define ELF_PROC_SLOTS 8u
+#define ELF_STACK_SIZE 4096u
+#define ELF_ARG_MAX 16u
 
 struct elf32_ehdr {
     u8 e_ident[16];
@@ -40,7 +43,44 @@ struct elf32_phdr {
     u32 p_align;
 } __attribute__((packed));
 
-static u8 user_image[ELF_USER_IMAGE_MAX];
+static u8 user_images[ELF_PROC_SLOTS][ELF_USER_IMAGE_MAX];
+static u8 user_stacks[ELF_PROC_SLOTS][ELF_STACK_SIZE];
+static int slot_owner_pid[ELF_PROC_SLOTS];
+static int slots_initialized = 0;
+
+extern volatile u32 ring3_current_pid;
+
+static void elf_slots_init_once(void) {
+    u32 i;
+    if (slots_initialized) {
+        return;
+    }
+    for (i = 0; i < ELF_PROC_SLOTS; ++i) {
+        slot_owner_pid[i] = -1;
+    }
+    slots_initialized = 1;
+}
+
+static int elf_slot_for_pid(int pid) {
+    u32 i;
+
+    elf_slots_init_once();
+
+    for (i = 0; i < ELF_PROC_SLOTS; ++i) {
+        if (slot_owner_pid[i] == pid) {
+            return (int)i;
+        }
+    }
+
+    for (i = 0; i < ELF_PROC_SLOTS; ++i) {
+        if (slot_owner_pid[i] < 0 || proc_state_of(slot_owner_pid[i]) == PROC_UNUSED) {
+            slot_owner_pid[i] = pid;
+            return (int)i;
+        }
+    }
+
+    return -1;
+}
 
 static int elf_validate_header(const struct elf32_ehdr *eh, u32 size, enum console_target target) {
     if (size < sizeof(struct elf32_ehdr)) {
@@ -71,7 +111,7 @@ static int elf_validate_header(const struct elf32_ehdr *eh, u32 size, enum conso
     return 1;
 }
 
-int elf_load_from_vfs(struct vfs_node *cwd, const char *path, struct proc_image *out_image, enum console_target target) {
+int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct proc_image *out_image, enum console_target target) {
     const char *data;
     u32 size;
     const struct elf32_ehdr *eh;
@@ -80,11 +120,20 @@ int elf_load_from_vfs(struct vfs_node *cwd, const char *path, struct proc_image 
     u32 min_vaddr = 0xFFFFFFFFu;
     u32 max_end = 0u;
     int load_count = 0;
+    int slot;
+    u8 *user_image;
 
-    if (!out_image || !vfs_read_file(cwd, path, &data, &size) || !data) {
+    if (!out_image || pid < 0 || !vfs_read_file(cwd, path, &data, &size) || !data) {
         console_print(target, "run: file not found\n");
         return 0;
     }
+
+    slot = elf_slot_for_pid(pid);
+    if (slot < 0) {
+        console_print(target, "run: no free process image slots\n");
+        return 0;
+    }
+    user_image = &user_images[slot][0];
 
     eh = (const struct elf32_ehdr *)data;
     if (!elf_validate_header(eh, size, target)) {
@@ -136,16 +185,22 @@ int elf_load_from_vfs(struct vfs_node *cwd, const char *path, struct proc_image 
     }
 
     out_image->loaded = 1;
-    out_image->image_base = (u32)&user_image[0];
+    out_image->image_base = (u32)user_image;
     out_image->image_size = (max_end - min_vaddr);
     out_image->entry = out_image->image_base + (eh->e_entry - min_vaddr);
+    out_image->user_stack_base = (u32)&user_stacks[slot][0];
+    out_image->user_stack_size = ELF_STACK_SIZE;
     return 1;
 }
 
-int elf_execute_image(const struct proc_image *image, int *ret_value, enum console_target target) {
-    int (*entry_fn)(void);
+int elf_execute_image(const struct proc_image *image, int pid, int argc, char **argv, int *ret_value, enum console_target target) {
+    u32 user_sp;
+    u32 argv_user[ELF_ARG_MAX];
+    u32 argv_table_addr;
+    int i;
+    int rc;
 
-    if (!image || !image->loaded) {
+    if (!image || !image->loaded || pid < 0) {
         console_print(target, "run: no loaded image\n");
         return 0;
     }
@@ -154,11 +209,64 @@ int elf_execute_image(const struct proc_image *image, int *ret_value, enum conso
         return 0;
     }
 
-    entry_fn = (int (*)(void))image->entry;
+    if (image->user_stack_size < 64u) {
+        console_print(target, "run: invalid user stack\n");
+        return 0;
+    }
+
+    if (argc < 0) {
+        argc = 0;
+    }
+    if ((u32)argc > ELF_ARG_MAX) {
+        argc = (int)ELF_ARG_MAX;
+    }
+
+    user_sp = image->user_stack_base + image->user_stack_size;
+    for (i = argc - 1; i >= 0; --i) {
+        const char *src = (argv && argv[i]) ? argv[i] : "";
+        u32 len = str_len(src) + 1u;
+        u32 j;
+        if (len > (image->user_stack_size - 64u)) {
+            console_print(target, "run: argument too long\n");
+            return 0;
+        }
+        if (user_sp < (image->user_stack_base + len + 16u)) {
+            console_print(target, "run: arguments exceed user stack\n");
+            return 0;
+        }
+        user_sp -= len;
+        for (j = 0; j < len; ++j) {
+            ((char *)user_sp)[j] = src[j];
+        }
+        argv_user[i] = user_sp;
+    }
+
+    user_sp &= ~3u;
+    if (user_sp < (image->user_stack_base + ((u32)(argc + 1) * 4u) + 8u)) {
+        console_print(target, "run: argument table exceeds user stack\n");
+        return 0;
+    }
+
+    user_sp -= ((u32)(argc + 1) * 4u);
+    argv_table_addr = user_sp;
+    for (i = 0; i < argc; ++i) {
+        ((u32 *)argv_table_addr)[i] = argv_user[i];
+    }
+    ((u32 *)argv_table_addr)[argc] = 0u;
+
+    if (user_sp < (image->user_stack_base + 8u)) {
+        console_print(target, "run: argument header exceeds user stack\n");
+        return 0;
+    }
+    user_sp -= 8u;
+    ((u32 *)user_sp)[0] = (u32)argc;
+    ((u32 *)user_sp)[1] = argv_table_addr;
+
+    ring3_current_pid = (u32)pid;
+    rc = enter_user_mode(image->entry, user_sp);
+    ring3_current_pid = 0u;
     if (ret_value) {
-        *ret_value = entry_fn();
-    } else {
-        (void)entry_fn();
+        *ret_value = rc;
     }
     return 1;
 }
