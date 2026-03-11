@@ -22,10 +22,15 @@ GRUB-from-ISO in QEMU is less reliable at exactly `2 MB`, so the default `make r
 - GRUB ISO boot config (`iso/boot/grub/grub.cfg`)
 - VGA text console command loop with commands:
   - Shell builtins: `help`, `clear`, `cd`, `heap`, `alloc N`, `reboot`, `halt`
-  - Program-style `/bin/*` commands: `ls`, `pwd`, `mkdir`, `touch`, `cat`, `echo`, `systeminfo`, `mounts`
+  - Program-style `/bin/*` commands: `ls`, `pwd`, `mkdir`, `touch`, `cat`, `echo`, `systeminfo`, `mounts`, `ps`, `run`, `ring3test`
 - Early watermark heap allocator initialized from Multiboot memory info
 - Basic IDT/PIC setup with timer and keyboard IRQ handling
 - Early syscall ABI wired on `int 0x80` (`read`, `write`, `open`, `close`, `getpid`, `exit` stubs)
+- Dedicated syscall entry stub separated from IRQ stubs, with strict register ABI (`eax` number, `ebx/ecx/edx/esi/edi` args)
+- Early task/process table with PID allocation and round-robin scheduler bookkeeping
+- Process lifecycle groundwork (`spawn`, `exit`, `wait` APIs) separated from task scheduling slots
+- ELF32 loader groundwork: validates and maps `PT_LOAD` segments into a reserved user-image buffer with `run PATH` execution hook
+- Ring 3 transition groundwork: kernel-owned GDT/TSS setup plus `iret`-based CPL3 test path with controlled syscall return to kernel
 - Tiny in-memory VFS for shell navigation and file inspection
 - Storage/filesystem groundwork: block device registry, thin IDE/ATAPI CD probe/read layer, and mount table with `memfs` + `iso9660` placeholder
 - COM1 serial logging plus a second shell context on the serial console

@@ -24,7 +24,7 @@ FLOPPY_IMAGE := $(BUILD_DIR)/slop-floppy.img
 CFLAGS := -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra
 LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
 
-KERNEL_ASM_SRCS := kernel/irq_stubs.asm
+KERNEL_ASM_SRCS := kernel/irq_stubs.asm kernel/syscall_stubs.asm kernel/protection_low.asm
 KERNEL_ASM_OBJ := $(patsubst kernel/%.asm,$(OBJ_DIR)/%.o,$(KERNEL_ASM_SRCS))
 BOOT_OBJ := $(OBJ_DIR)/boot32.o
 BOOT_FB_OBJ := $(OBJ_DIR)/boot32_fb.o

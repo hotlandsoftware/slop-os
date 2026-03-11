@@ -159,7 +159,7 @@ void print_systeminfo(const struct multiboot_info *mbi, u32 magic) {
 
     term_print("  Timer ticks:      ");
     term_print_u32_dec(timer_ticks());
-    term_print(" (IRQ path disabled)\n");
+    term_print(" (IRQ0 preemption)\n");
 
     term_print("  Heap state:       ");
     if (heap_is_ready()) {
@@ -177,6 +177,18 @@ void print_systeminfo(const struct multiboot_info *mbi, u32 magic) {
 
     term_print("  Mount entries:    ");
     term_print_u32_dec(fs_mount_count());
+    term_print("\n");
+
+    term_print("  Tasks:            ");
+    term_print_u32_dec(task_count());
+    term_print("\n");
+
+    term_print("  Processes:        ");
+    term_print_u32_dec(proc_count());
+    term_print("\n");
+
+    term_print("  Sched switches:   ");
+    term_print_u32_dec(scheduler_switch_count());
     term_print("\n");
 
     term_putchar('\n');

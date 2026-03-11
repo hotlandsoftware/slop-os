@@ -11,6 +11,9 @@
 - Enter 32-bit protected mode.
 - Basic interrupt descriptor table. (in progress)
 - Timer + keyboard IRQ handling. (in progress)
+- Task table + scheduler bookkeeping groundwork in kernel. (in progress)
+- Process object model (`spawn/exit/wait`) separated from scheduler task slots. (in progress)
+- Ring 3 transition path groundwork via kernel GDT/TSS and `iret` test entry/return. (in progress)
 - IPC primitive for user-space servers.
 - Separate optional QEMU framebuffer text console build. (in progress)
 - Storage/filesystem groundwork: block device API, thin IDE/ATAPI CD access layer, mount table, and CD/ISO placeholders. (in progress)
@@ -29,4 +32,5 @@
 - Tiny libc subset.
 - Init process and `/etc/inittab`-like config.
 - POSIX-flavored syscall compatibility layer over message passing.
-- `int 0x80` syscall ABI scaffold is in place as the first compatibility step.
+- `int 0x80` syscall ABI scaffold is in place as the first compatibility step, with a dedicated syscall entry stub separated from IRQ stubs.
+- Early ELF32 loader path validates `ET_EXEC`/`EM_386` and maps `PT_LOAD` segments into a controlled user-image region.

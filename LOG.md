@@ -25,3 +25,14 @@ Currently, we are in the "very early" development phase.
 - Added an initial POSIX-like syscall ABI on `int 0x80` (`read`, `write`, `open`, `close`, `getpid`, `exit` stubs).
 - Shell now resolves program-style commands through `/bin/*` execution hooks instead of keeping all commands as direct shell builtins.
 - Seeded `/bin` command stubs as groundwork for a future ELF loader and true userspace processes
+- Added a dedicated syscall entry stub (`int 0x80`) separate from IRQ stubs with fixed register calling convention.
+- Added early task/process table groundwork with PID tracking and round-robin scheduler bookkeeping.
+- Added `ps` command to inspect task table state.
+- Enabled timer IRQ preemption bookkeeping (IRQ0 unmasked, interrupts enabled) with a fixed scheduler timeslice.
+- Added a separate process table layer (`spawn/exit/wait`) to track lifecycle independently of scheduler task slots.
+- Updated `ps`/system reporting to show both task scheduler state and process lifecycle state.
+- Added ELF32 loader groundwork (header validation + `PT_LOAD` mapping into a reserved user-image buffer).
+- Added `run PATH` command and seeded `/bin/hello.elf` test image for initial execution-path testing.
+- Added kernel-owned GDT/TSS protection setup and an `iret`-based Ring 3 transition test path.
+- Added `ring3test` command that enters CPL3, performs syscall interaction, and returns to kernel control.
+- Added kernel panics.

@@ -1,6 +1,7 @@
 #include "kernel.h"
 
 #define COM1_PORT 0x3F8
+#define SERIAL_TX_SPIN_MAX 100000u
 
 static int serial_ready = 0;
 
@@ -29,6 +30,8 @@ int serial_is_ready(void) {
 }
 
 void serial_putchar(char c) {
+    u32 spins = 0;
+
     if (!serial_ready) {
         return;
     }
@@ -38,6 +41,9 @@ void serial_putchar(char c) {
     }
 
     while (!serial_transmit_empty()) {
+        if (++spins >= SERIAL_TX_SPIN_MAX) {
+            return;
+        }
     }
     outb(COM1_PORT, (u8)c);
 }

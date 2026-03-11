@@ -26,7 +26,10 @@ extern void idt_load(const struct idt_ptr *ptr);
 extern void irq0_stub(void);
 extern void irq1_stub(void);
 extern void irq_default_stub(void);
-extern void irq80_stub(void);
+extern void syscall_stub(void);
+extern void ex6_stub(void);
+extern void ex13_stub(void);
+extern void ex14_stub(void);
 
 static struct idt_entry idt[IDT_ENTRIES];
 static struct idt_ptr idtp;
@@ -125,7 +128,10 @@ static void idt_init(void) {
 
     idt_set_gate(IRQ_BASE + 0, irq0_stub);
     idt_set_gate(IRQ_BASE + 1, irq1_stub);
-    idt_set_gate_user(0x80, irq80_stub);
+    idt_set_gate(6, ex6_stub);
+    idt_set_gate(13, ex13_stub);
+    idt_set_gate(14, ex14_stub);
+    idt_set_gate_user(0x80, syscall_stub);
 
     idtp.limit = (u16)(sizeof(idt) - 1u);
     idtp.base = (u32)&idt[0];
@@ -184,9 +190,20 @@ static char decode_scancode(u8 scancode) {
 void interrupt_dispatch(struct interrupt_frame *frame) {
     u8 irq;
 
-    if (frame->vector == 0x80u) {
-        syscall_dispatch(frame);
-        return;
+    if (frame->vector < 32u) {
+        term_print("\nKERNEL EXCEPTION\n");
+        term_print("  vector: ");
+        term_print_u32_dec(frame->vector);
+        term_print("\n  error:  ");
+        term_print_hex_u32(frame->error_code);
+        term_print("\n  eip:    ");
+        term_print_hex_u32(frame->eip);
+        term_print("\n  cs:     ");
+        term_print_hex_u32(frame->cs);
+        term_print("\n  eflags: ");
+        term_print_hex_u32(frame->eflags);
+        term_print("\n");
+        halt_forever();
     }
 
     if (frame->vector < IRQ_BASE || frame->vector >= IRQ_BASE + 16u) {
@@ -196,6 +213,7 @@ void interrupt_dispatch(struct interrupt_frame *frame) {
     irq = (u8)(frame->vector - IRQ_BASE);
     if (irq == 0u) {
         ++tick_count;
+        scheduler_on_timer_tick();
     } else if (irq == 1u) {
         char c = decode_scancode(inb(0x60));
         if (c != 0 && c != '\t') {
@@ -211,8 +229,8 @@ void interrupts_init(void) {
     pic_remap();
     idt_init();
 
-    pic_set_mask(0, 1);
-    pic_set_mask(1, 0);
+    pic_set_mask(0, 0);
+    pic_set_mask(1, 1);
     pic_set_mask(2, 1);
     pic_set_mask(3, 1);
     pic_set_mask(4, 1);
@@ -256,4 +274,16 @@ int keyboard_read_char_blocking(char *out) {
 
 u32 timer_ticks(void) {
     return tick_count;
+}
+
+void interrupts_get_gate80(u16 *selector, u8 *type_attr, u32 *offset) {
+    if (selector) {
+        *selector = idt[0x80].selector;
+    }
+    if (type_attr) {
+        *type_attr = idt[0x80].type_attr;
+    }
+    if (offset) {
+        *offset = ((u32)idt[0x80].offset_high << 16) | idt[0x80].offset_low;
+    }
 }

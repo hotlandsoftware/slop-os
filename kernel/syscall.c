@@ -1,6 +1,7 @@
 #include "kernel.h"
 
 #define SYSCALL_WRITE_MAX 1024u
+#define SYSCALL_RET_KERNEL_MAGIC ((int)0x534C4F50)
 
 static int ksys_read(int fd, char *buf, u32 len) {
     u32 i;
@@ -35,7 +36,7 @@ static int ksys_write(int fd, const char *buf, u32 len) {
     }
 
     for (i = 0; i < len; ++i) {
-        console_putchar(CONSOLE_BOTH, buf[i]);
+        console_putchar(CONSOLE_VGA, buf[i]);
     }
 
     return (int)len;
@@ -53,42 +54,51 @@ static int ksys_close(int fd) {
 }
 
 static int ksys_getpid(void) {
-    return 1;
+    return task_current_pid();
 }
 
 static void ksys_exit(int code) {
-    console_printf(CONSOLE_BOTH, "process exited with code %d\n", code);
+    int pid = task_current_pid();
+    if (pid > 0) {
+        (void)proc_exit(pid, code);
+    }
+    console_printf(CONSOLE_BOTH, "process %d exited with code %d\n", pid, code);
 }
 
-void syscall_dispatch(struct interrupt_frame *frame) {
+int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5) {
     int ret = -1;
+    (void)a4;
+    (void)a5;
 
-    switch (frame->eax) {
+    switch (num) {
         case SYS_READ:
-            ret = ksys_read((int)frame->ebx, (char *)frame->ecx, frame->edx);
+            ret = ksys_read((int)a1, (char *)a2, a3);
             break;
         case SYS_WRITE:
-            ret = ksys_write((int)frame->ebx, (const char *)frame->ecx, frame->edx);
+            ret = ksys_write((int)a1, (const char *)a2, a3);
             break;
         case SYS_OPEN:
-            ret = ksys_open((const char *)frame->ebx, frame->ecx);
+            ret = ksys_open((const char *)a1, a2);
             break;
         case SYS_CLOSE:
-            ret = ksys_close((int)frame->ebx);
+            ret = ksys_close((int)a1);
             break;
         case SYS_GETPID:
             ret = ksys_getpid();
             break;
         case SYS_EXIT:
-            ksys_exit((int)frame->ebx);
+            ksys_exit((int)a1);
             ret = 0;
+            break;
+        case SYS_RET_KERNEL:
+            ret = SYSCALL_RET_KERNEL_MAGIC;
             break;
         default:
             ret = -1;
             break;
     }
 
-    frame->eax = (u32)ret;
+    return ret;
 }
 
 int sys_write(int fd, const char *buf, u32 len) {

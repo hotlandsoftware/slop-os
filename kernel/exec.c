@@ -7,6 +7,21 @@ struct exec_program {
     int (*entry)(int argc, char **argv, struct exec_context *ctx);
 };
 
+static const u8 hello_elf[] = {
+    0x7F, 0x45, 0x4C, 0x46, 0x01, 0x01, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x54, 0x80, 0x04, 0x08, 0x34, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x34, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x54, 0x00, 0x00, 0x00,
+    0x54, 0x80, 0x04, 0x08, 0x54, 0x80, 0x04, 0x08,
+    0x06, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+    0x05, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
+    0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3
+};
+
 static int prog_pwd(int argc, char **argv, struct exec_context *ctx) {
     char path[128];
     (void)argc;
@@ -140,6 +155,59 @@ static int prog_mounts(int argc, char **argv, struct exec_context *ctx) {
     return 0;
 }
 
+static int prog_ps(int argc, char **argv, struct exec_context *ctx) {
+    (void)argc;
+    (void)argv;
+    task_list(ctx->output);
+    return 0;
+}
+
+static int prog_run(int argc, char **argv, struct exec_context *ctx) {
+    struct proc_image image;
+    int rc;
+    int pid;
+
+    if (argc < 2) {
+        console_print(ctx->output, "run: usage run PATH\n");
+        return -1;
+    }
+
+    if (!elf_load_from_vfs(*ctx->cwd, argv[1], &image, ctx->output)) {
+        return -1;
+    }
+
+    pid = task_current_pid();
+    if (pid >= 0) {
+        (void)proc_bind_image(pid, &image);
+    }
+
+    if (!elf_execute_image(&image, &rc, ctx->output)) {
+        return -1;
+    }
+
+    console_print(ctx->output, "run: ");
+    console_print(ctx->output, argv[1]);
+    console_print(ctx->output, " returned ");
+    if (rc < 0) {
+        console_print(ctx->output, "-");
+        console_print_u32_dec(ctx->output, (u32)(-rc));
+    } else {
+        console_print_u32_dec(ctx->output, (u32)rc);
+    }
+    console_putchar(ctx->output, '\n');
+    return 0;
+}
+
+static int prog_ring3test(int argc, char **argv, struct exec_context *ctx) {
+    (void)argc;
+    (void)argv;
+    if (!ring3_test(ctx->output)) {
+        console_print(ctx->output, "ring3test: failed\n");
+        return -1;
+    }
+    return 0;
+}
+
 static const struct exec_program programs[] = {
     {"/bin/pwd", prog_pwd},
     {"/bin/ls", prog_ls},
@@ -148,7 +216,10 @@ static const struct exec_program programs[] = {
     {"/bin/cat", prog_cat},
     {"/bin/echo", prog_echo},
     {"/bin/systeminfo", prog_systeminfo},
-    {"/bin/mounts", prog_mounts}
+    {"/bin/mounts", prog_mounts},
+    {"/bin/ps", prog_ps},
+    {"/bin/run", prog_run},
+    {"/bin/ring3test", prog_ring3test}
 };
 
 void exec_seed_programs(void) {
@@ -160,6 +231,7 @@ void exec_seed_programs(void) {
         const struct exec_program *p = &programs[i];
         (void)vfs_write_file(vfs_root(), p->path, seed, str_len(seed));
     }
+    (void)vfs_write_file(vfs_root(), "/bin/hello.elf", (const char *)hello_elf, sizeof(hello_elf));
 }
 
 int exec_run_path(const char *path, int argc, char **argv, struct exec_context *ctx) {
@@ -167,7 +239,8 @@ int exec_run_path(const char *path, int argc, char **argv, struct exec_context *
     for (i = 0; i < (sizeof(programs) / sizeof(programs[0])); ++i) {
         const struct exec_program *p = &programs[i];
         if (str_eq(path, p->path)) {
-            return p->entry(argc, argv, ctx) == 0;
+            (void)p->entry(argc, argv, ctx);
+            return 1;
         }
     }
     return 0;

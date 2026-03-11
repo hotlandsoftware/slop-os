@@ -26,12 +26,30 @@ static int shell_split_args(char *line, char **argv, int max_args) {
         if (*p == '\0') {
             break;
         }
-        argv[argc++] = p;
-        while (*p && *p != ' ') {
+
+        if (*p == '>') {
+            argv[argc++] = (char *)">";
             ++p;
+            continue;
+        }
+
+        argv[argc++] = p;
+        {
+            int split_on_redirect = 0;
+            while (*p && *p != ' ') {
+                if (*p == '>') {
+                    *p = '\0';
+                    split_on_redirect = 1;
+                    break;
+                }
+                ++p;
+            }
+            if (split_on_redirect) {
+                continue;
+            }
         }
         if (*p == '\0') {
-            break;
+            continue;
         }
         *p++ = '\0';
     }
@@ -50,7 +68,7 @@ static void shell_print_help(struct shell_context *ctx) {
     console_print(ctx->output, "Program-style commands (/bin/*):\n");
     console_print(ctx->output, "  ls [PATH], pwd, mkdir PATH, touch PATH\n");
     console_print(ctx->output, "  cat PATH, echo TEXT, echo TEXT > PATH\n");
-    console_print(ctx->output, "  systeminfo, mounts\n");
+    console_print(ctx->output, "  systeminfo, mounts, ps, run PATH, ring3test\n");
 }
 
 static void shell_print_heap_summary(struct shell_context *ctx) {

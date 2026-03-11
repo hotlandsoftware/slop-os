@@ -83,6 +83,7 @@ struct interrupt_frame {
     u32 ecx;
     u32 eax;
     u32 vector;
+    u32 error_code;
     u32 eip;
     u32 cs;
     u32 eflags;
@@ -94,7 +95,8 @@ enum syscall_id {
     SYS_OPEN = 2,
     SYS_CLOSE = 3,
     SYS_GETPID = 20,
-    SYS_EXIT = 60
+    SYS_EXIT = 60,
+    SYS_RET_KERNEL = 240
 };
 
 struct exec_context {
@@ -102,6 +104,45 @@ struct exec_context {
     struct vfs_node **cwd;
     const struct multiboot_info *mbi;
     u32 magic;
+};
+
+enum task_state {
+    TASK_UNUSED = 0,
+    TASK_READY = 1,
+    TASK_RUNNING = 2,
+    TASK_BLOCKED = 3,
+    TASK_ZOMBIE = 4
+};
+
+struct task_info {
+    int pid;
+    int ppid;
+    enum task_state state;
+    u32 runtime_ticks;
+    char name[16];
+};
+
+enum proc_state {
+    PROC_UNUSED = 0,
+    PROC_READY = 1,
+    PROC_RUNNING = 2,
+    PROC_BLOCKED = 3,
+    PROC_ZOMBIE = 4
+};
+
+struct process_info {
+    int pid;
+    int ppid;
+    enum proc_state state;
+    int exit_code;
+    char name[16];
+};
+
+struct proc_image {
+    int loaded;
+    u32 entry;
+    u32 image_base;
+    u32 image_size;
 };
 
 void term_init(void);
@@ -147,6 +188,10 @@ void cpu_vendor(char out[13]);
 int keyboard_try_read_char(char *out);
 int keyboard_read_char_blocking(char *out);
 void cpu_relax_wait(void);
+void protection_init(void);
+void tss_set_kernel_stack(u32 esp0);
+int enter_user_mode(u32 entry, u32 user_stack);
+int ring3_test(enum console_target target);
 
 void serial_init(void);
 int serial_is_ready(void);
@@ -156,13 +201,36 @@ int serial_try_read_char(char *out);
 
 void interrupts_init(void);
 u32 timer_ticks(void);
-void syscall_dispatch(struct interrupt_frame *frame);
+void interrupts_get_gate80(u16 *selector, u8 *type_attr, u32 *offset);
 int sys_write(int fd, const char *buf, u32 len);
 int sys_read(int fd, char *buf, u32 len);
 int sys_open(const char *path, u32 flags);
 int sys_close(int fd);
 int sys_getpid(void);
 void sys_exit(int code);
+int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5);
+
+void tasking_init(void);
+int task_spawn_kernel(const char *name, int ppid);
+void scheduler_on_timer_tick(void);
+int task_current_pid(void);
+u32 task_count(void);
+u32 scheduler_switch_count(void);
+void task_list(enum console_target target);
+
+void proc_init(void);
+int proc_spawn_kernel(const char *name, int ppid);
+int proc_exit(int pid, int code);
+int proc_wait(int ppid, int *child_pid, int *exit_code);
+void proc_set_state(int pid, enum proc_state state);
+enum proc_state proc_state_of(int pid);
+const char *proc_state_name(enum proc_state state);
+u32 proc_count(void);
+int proc_bind_image(int pid, const struct proc_image *image);
+int proc_get_image(int pid, struct proc_image *image);
+
+int elf_load_from_vfs(struct vfs_node *cwd, const char *path, struct proc_image *out_image, enum console_target target);
+int elf_execute_image(const struct proc_image *image, int *ret_value, enum console_target target);
 
 void heap_init(const struct multiboot_info *mbi, u32 magic);
 void *kmalloc(size_t size);
