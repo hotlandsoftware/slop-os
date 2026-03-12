@@ -69,6 +69,12 @@ struct mount_entry {
     int device_id;
 };
 
+#define FS_DIRENT_NAME_MAX 63
+struct fs_dir_entry {
+    char name[FS_DIRENT_NAME_MAX + 1];
+    int is_dir;
+};
+
 struct interrupt_frame {
     u32 gs;
     u32 fs;
@@ -94,9 +100,27 @@ enum syscall_id {
     SYS_WRITE = 1,
     SYS_OPEN = 2,
     SYS_CLOSE = 3,
+    SYS_MKDIR = 83,
+    SYS_GETCWD = 183,
     SYS_GETPID = 20,
     SYS_EXIT = 60,
+    SYS_LIST = 241,
+    SYS_SYSTEMINFO = 242,
+    SYS_PS = 243,
+    SYS_MEMINFO = 244,
     SYS_RET_KERNEL = 240
+};
+
+struct mem_info {
+    u32 mem_total_kib;
+    u32 mem_used_kib;
+    u32 mem_free_kib;
+    u32 mem_shared_kib;
+    u32 mem_buff_cache_kib;
+    u32 mem_available_kib;
+    u32 swap_total_kib;
+    u32 swap_used_kib;
+    u32 swap_free_kib;
 };
 
 struct exec_context {
@@ -209,9 +233,11 @@ int sys_read(int fd, char *buf, u32 len);
 int sys_open(const char *path, u32 flags);
 int sys_close(int fd);
 int sys_getpid(void);
+int sys_meminfo(struct mem_info *info);
 void sys_exit(int code);
 int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5);
 void syscall_set_user_cwd(struct vfs_node *cwd);
+void syscall_set_bootinfo(const struct multiboot_info *mbi, u32 magic);
 
 void tasking_init(void);
 int task_spawn_kernel(const char *name, int ppid);
@@ -268,8 +294,12 @@ int fs_mount(const char *path, const char *fs_name, int device_id);
 const struct mount_entry *fs_mounts(void);
 u32 fs_mount_count(void);
 void fs_print_mounts(enum console_target target);
+int fs_read_file_from_mount(const char *mount_path, const char *path, char **out_data, u32 *out_size);
+int fs_list_dir_from_mount(const char *mount_path, const char *path, enum console_target target);
+int fs_path_is_dir_from_mount(const char *mount_path, const char *path);
+int fs_list_dir_entries_from_mount(const char *mount_path, const char *path, struct fs_dir_entry *entries, u32 max_entries, u32 *out_count);
 
-void exec_seed_programs(void);
+int exec_seed_programs(void);
 int exec_run_path(const char *path, int argc, char **argv, struct exec_context *ctx);
 
 void print_systeminfo(const struct multiboot_info *mbi, u32 magic);

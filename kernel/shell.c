@@ -63,16 +63,19 @@ static void shell_print_help(struct shell_context *ctx) {
     console_print(ctx->output, "  help       - list commands\n");
     console_print(ctx->output, "  clear      - clear screen\n");
     console_print(ctx->output, "  cd PATH    - change directory (shell builtin)\n");
+    console_print(ctx->output, "  dir [PATH] - list directory (shell builtin)\n");
+    console_print(ctx->output, "  file PATH  - inspect file header (shell builtin)\n");
     console_print(ctx->output, "  alloc N    - allocate N bytes from kernel heap\n");
     console_print(ctx->output, "  panic      - trigger kernel panic screen\n");
     console_print(ctx->output, "  reboot     - reset machine\n");
     console_print(ctx->output, "  halt       - stop CPU\n");
     console_print(ctx->output, "Program-style commands (/bin/*):\n");
     console_print(ctx->output, "  ls [PATH], pwd, mkdir PATH, touch PATH\n");
-    console_print(ctx->output, "  cat PATH\n");
+    console_print(ctx->output, "  cat PATH, systeminfo, ps, free, free2\n");
+    console_print(ctx->output, "  mounts, ring3test\n");
+    console_print(ctx->output, "  tip: try ls /mount/cdrom and cat /mount/cdrom/...\n");
     console_print(ctx->output, "Shell builtins:\n");
     console_print(ctx->output, "  echo TEXT, echo TEXT > PATH\n");
-    console_print(ctx->output, "  systeminfo, mounts, ps, run PATH, ring3test\n");
 }
 
 static void shell_print_heap_summary(struct shell_context *ctx) {
@@ -122,6 +125,41 @@ static void shell_handle_cd(struct shell_context *ctx, const char *arg) {
     if (!vfs_change_dir(&ctx->cwd, arg)) {
         console_print(ctx->output, "cd: no such directory\n");
     }
+}
+
+static void shell_handle_dir(struct shell_context *ctx, const char *arg) {
+    arg = skip_spaces(arg);
+    if (*arg == '\0') {
+        vfs_list(ctx->cwd, "", ctx->output);
+        return;
+    }
+    vfs_list(ctx->cwd, arg, ctx->output);
+}
+
+static void shell_handle_file(struct shell_context *ctx, const char *arg) {
+    const char *data = (const char *)0;
+    u32 size = 0u;
+
+    arg = skip_spaces(arg);
+    if (*arg == '\0') {
+        console_print(ctx->output, "Usage: file PATH\n");
+        return;
+    }
+    if (!vfs_read_file(ctx->cwd, arg, &data, &size) || !data) {
+        console_print(ctx->output, "file: no such file\n");
+        return;
+    }
+
+    console_print(ctx->output, "size=");
+    console_print_u32_dec(ctx->output, size);
+    if (size >= 4u) {
+        console_print(ctx->output, " magic=");
+        console_print_hex_u32(ctx->output, ((u32)(u8)data[0]) |
+                                           ((u32)(u8)data[1] << 8) |
+                                           ((u32)(u8)data[2] << 16) |
+                                           ((u32)(u8)data[3] << 24));
+    }
+    console_print(ctx->output, "\n");
 }
 
 static void shell_handle_echo(struct shell_context *ctx, char *line) {
@@ -261,6 +299,12 @@ static void shell_execute_line(struct shell_context *ctx, const struct multiboot
         shell_print_heap_summary(ctx);
     } else if (str_startswith(trimmed, "alloc ")) {
         shell_handle_alloc(ctx, trimmed + 6);
+    } else if (str_eq(trimmed, "dir")) {
+        shell_handle_dir(ctx, "");
+    } else if (str_startswith(trimmed, "dir ")) {
+        shell_handle_dir(ctx, trimmed + 4);
+    } else if (str_startswith(trimmed, "file ")) {
+        shell_handle_file(ctx, trimmed + 5);
     } else if (str_startswith(trimmed, "cd ")) {
         shell_handle_cd(ctx, trimmed + 3);
     } else if (str_eq(trimmed, "panic")) {
@@ -274,7 +318,7 @@ static void shell_execute_line(struct shell_context *ctx, const struct multiboot
     } else if (str_eq(trimmed, "echo") || str_startswith(trimmed, "echo ")) {
         shell_handle_echo(ctx, trimmed);
     } else {
-        if (!shell_run_program(ctx, mbi, magic, trimmed)) {
+        if (shell_run_program(ctx, mbi, magic, trimmed) == 0) {
             console_print(ctx->output, "Unknown command/program. Type \"help\".\n");
         }
     }

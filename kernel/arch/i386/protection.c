@@ -50,7 +50,10 @@ extern void tss_flush(u16 tss_selector);
 static struct gdt_entry gdt[6];
 static struct gdt_ptr gdtr;
 static struct tss_entry tss;
-static u8 ring3_kernel_stack[4096];
+/* Syscalls running from Ring 3 can traverse filesystem code paths that use
+   sizeable local buffers (e.g., ISO sector buffers). Keep this stack large
+   enough to avoid corrupting kernel globals. */
+static u8 ring3_kernel_stack[32768];
 
 volatile u32 ring3_return_esp = 0;
 volatile u32 ring3_active = 0;

@@ -1,0 +1,89 @@
+mkdir -p "build/obj"
+mkdir -p "build/obj/arch/i386/"
+nasm -f elf32 -o build/obj/arch/i386/boot32.o kernel/arch/i386/boot32.asm
+mkdir -p "build/obj/arch/i386/"
+nasm -f elf32 -o build/obj/arch/i386/irq_stubs.o kernel/arch/i386/irq_stubs.asm
+mkdir -p "build/obj/arch/i386/"
+nasm -f elf32 -o build/obj/arch/i386/syscall_stubs.o kernel/arch/i386/syscall_stubs.asm
+mkdir -p "build/obj/arch/i386/"
+nasm -f elf32 -o build/obj/arch/i386/protection_low.o kernel/arch/i386/protection_low.asm
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/atapi.o kernel/atapi.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/console.o kernel/console.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/elf.o kernel/elf.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/exec.o kernel/exec.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/fs.o kernel/fs.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/heap.o kernel/heap.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/kmain.o kernel/kmain.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/panic.o kernel/panic.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/proc.o kernel/proc.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/shell.o kernel/shell.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/storage.o kernel/storage.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/syscall.o kernel/syscall.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/task.o kernel/task.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/util.o kernel/util.c
+mkdir -p "build/obj/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/vfs.o kernel/vfs.c
+mkdir -p "build/obj/arch/i386/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/arch/i386/interrupts.o kernel/arch/i386/interrupts.c
+mkdir -p "build/obj/arch/i386/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/arch/i386/platform.o kernel/arch/i386/platform.c
+mkdir -p "build/obj/arch/i386/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/arch/i386/protection.o kernel/arch/i386/protection.c
+mkdir -p "build/obj/arch/i386/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/arch/i386/ring3.o kernel/arch/i386/ring3.c
+mkdir -p "build/obj/arch/i386/"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -Ikernel -c -o build/obj/arch/i386/serial.o kernel/arch/i386/serial.c
+ld -m elf_i386 -T linker.ld -nostdlib -o build/slop-kernel.elf build/obj/arch/i386/boot32.o build/obj/arch/i386/irq_stubs.o build/obj/arch/i386/syscall_stubs.o build/obj/arch/i386/protection_low.o build/obj/atapi.o build/obj/console.o build/obj/elf.o build/obj/exec.o build/obj/fs.o build/obj/heap.o build/obj/kmain.o build/obj/panic.o build/obj/proc.o build/obj/shell.o build/obj/storage.o build/obj/syscall.o build/obj/task.o build/obj/util.o build/obj/vfs.o build/obj/arch/i386/interrupts.o build/obj/arch/i386/platform.o build/obj/arch/i386/protection.o build/obj/arch/i386/ring3.o build/obj/arch/i386/serial.o
+mkdir -p "build/user"
+nasm -f elf32 -o build/user/crt0.o user/crt0.asm
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -c -o build/user/cat.o user/cat.c
+ld -m elf_i386 -T user/linker.ld -nostdlib -o build/user/cat.elf build/user/crt0.o build/user/cat.o
+mkdir -p "build/isofiles/bin"
+cp "build/user/cat.elf" "build/isofiles/bin/cat"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -c -o build/user/touch.o user/touch.c
+ld -m elf_i386 -T user/linker.ld -nostdlib -o build/user/touch.elf build/user/crt0.o build/user/touch.o
+mkdir -p "build/isofiles/bin"
+cp "build/user/touch.elf" "build/isofiles/bin/touch"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -c -o build/user/ls.o user/ls.c
+ld -m elf_i386 -T user/linker.ld -nostdlib -o build/user/ls.elf build/user/crt0.o build/user/ls.o
+mkdir -p "build/isofiles/bin"
+cp "build/user/ls.elf" "build/isofiles/bin/ls"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -c -o build/user/pwd.o user/pwd.c
+ld -m elf_i386 -T user/linker.ld -nostdlib -o build/user/pwd.elf build/user/crt0.o build/user/pwd.o
+mkdir -p "build/isofiles/bin"
+cp "build/user/pwd.elf" "build/isofiles/bin/pwd"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -c -o build/user/mkdir.o user/mkdir.c
+ld -m elf_i386 -T user/linker.ld -nostdlib -o build/user/mkdir.elf build/user/crt0.o build/user/mkdir.o
+mkdir -p "build/isofiles/bin"
+cp "build/user/mkdir.elf" "build/isofiles/bin/mkdir"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -c -o build/user/ps.o user/ps.c
+ld -m elf_i386 -T user/linker.ld -nostdlib -o build/user/ps.elf build/user/crt0.o build/user/ps.o
+mkdir -p "build/isofiles/bin"
+cp "build/user/ps.elf" "build/isofiles/bin/ps"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -c -o build/user/systeminfo.o user/systeminfo.c
+ld -m elf_i386 -T user/linker.ld -nostdlib -o build/user/systeminfo.elf build/user/crt0.o build/user/systeminfo.o
+mkdir -p "build/isofiles/bin"
+cp "build/user/systeminfo.elf" "build/isofiles/bin/systeminfo"
+cc -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -m32 -march=i486 -mtune=i486 -O2 -Wall -Wextra -c -o build/user/free.o user/free.c
+ld -m elf_i386 -T user/linker.ld -nostdlib -o build/user/free.elf build/user/crt0.o build/user/free.o
+mkdir -p "build/isofiles/bin"
+cp "build/user/free.elf" "build/isofiles/bin/free"
+mkdir -p "build/isofiles/boot/grub"
+cp "build/slop-kernel.elf" "build/isofiles/boot/slop-kernel.elf"
+cp "iso/boot/grub/grub.cfg" "build/isofiles/boot/grub/grub.cfg"
+grub-mkrescue -o build/slop.iso build/isofiles
+rm build/user/cat.o build/user/pwd.o build/user/ls.elf build/user/systeminfo.elf build/user/pwd.elf build/user/free.elf build/user/cat.elf build/user/free.o build/user/ps.elf build/user/mkdir.o build/user/mkdir.elf build/user/ls.o build/user/systeminfo.o build/user/touch.o build/user/ps.o build/user/touch.elf

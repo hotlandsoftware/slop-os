@@ -1,5 +1,7 @@
 #include "kernel.h"
 
+#define USER_IMAGE_RESERVED_BASE 0x00300000u
+
 struct heap_state {
     u32 start;
     u32 current;
@@ -26,6 +28,9 @@ void heap_init(const struct multiboot_info *mbi, u32 magic) {
     if (magic == MULTIBOOT_MAGIC && mbi && (mbi->flags & 0x1u)) {
         heap_limit = 0x00100000u + (mbi->mem_upper * 1024u);
         heap_limit = align_up(heap_limit, 16u);
+        if (heap_limit > USER_IMAGE_RESERVED_BASE) {
+            heap_limit = USER_IMAGE_RESERVED_BASE;
+        }
         if (heap_limit > heap_start) {
             heap.limit = heap_limit;
             heap.ready = 1;

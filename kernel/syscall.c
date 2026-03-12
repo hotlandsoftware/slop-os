@@ -19,9 +19,16 @@ struct fd_entry {
 
 static struct fd_entry fd_table[16];
 static struct vfs_node *user_cwd = (struct vfs_node *)0;
+static const struct multiboot_info *user_boot_mbi = (const struct multiboot_info *)0;
+static u32 user_boot_magic = 0u;
 
 void syscall_set_user_cwd(struct vfs_node *cwd) {
     user_cwd = cwd;
+}
+
+void syscall_set_bootinfo(const struct multiboot_info *mbi, u32 magic) {
+    user_boot_mbi = mbi;
+    user_boot_magic = magic;
 }
 
 static int range_contains(u32 base, u32 size, u32 ptr, u32 len) {
@@ -240,6 +247,111 @@ static int ksys_getpid(void) {
     return task_current_pid();
 }
 
+static int ksys_mkdir(const char *path) {
+    char kpath[128];
+    if (!path) {
+        return ERR_INVAL;
+    }
+    if (!copy_user_cstr(path, kpath, sizeof(kpath))) {
+        return ERR_FAULT;
+    }
+    if (!vfs_make_dir(user_cwd ? user_cwd : vfs_root(), kpath)) {
+        return ERR_INVAL;
+    }
+    return 0;
+}
+
+static int ksys_getcwd(char *buf, u32 len) {
+    char path[128];
+    u32 i;
+    u32 n;
+    if (!buf || len == 0u) {
+        return ERR_INVAL;
+    }
+    if (!validate_user_ptr(buf, len)) {
+        return ERR_FAULT;
+    }
+    vfs_get_cwd_path(user_cwd ? user_cwd : vfs_root(), path, sizeof(path));
+    n = str_len(path);
+    if (n + 1u > len) {
+        return ERR_INVAL;
+    }
+    for (i = 0; i <= n; ++i) {
+        buf[i] = path[i];
+    }
+    return (int)n;
+}
+
+static int ksys_list(const char *path) {
+    char kpath[128];
+    if (!path || (u32)path == 0u) {
+        vfs_list(user_cwd ? user_cwd : vfs_root(), (const char *)0, CONSOLE_VGA);
+        return 0;
+    }
+    if (!copy_user_cstr(path, kpath, sizeof(kpath))) {
+        return ERR_FAULT;
+    }
+    vfs_list(user_cwd ? user_cwd : vfs_root(), kpath, CONSOLE_VGA);
+    return 0;
+}
+
+static int ksys_systeminfo(void) {
+    if (!user_boot_mbi || user_boot_magic != MULTIBOOT_MAGIC) {
+        console_print(CONSOLE_VGA, "systeminfo: boot info unavailable\n");
+        return ERR_INVAL;
+    }
+    print_systeminfo(user_boot_mbi, user_boot_magic);
+    return 0;
+}
+
+static int ksys_ps(void) {
+    task_list(CONSOLE_VGA);
+    return 0;
+}
+
+static int ksys_meminfo(struct mem_info *info) {
+    u32 total_kib = 0u;
+    u32 kernel_bytes = (u32)(&_kernel_end - &_kernel_start);
+    u32 used_bytes = kernel_bytes;
+    u32 free_bytes = 0u;
+
+    if (!info || !validate_user_ptr(info, sizeof(*info))) {
+        return ERR_FAULT;
+    }
+
+    if (user_boot_mbi && user_boot_magic == MULTIBOOT_MAGIC && (user_boot_mbi->flags & 0x1u)) {
+        total_kib = user_boot_mbi->mem_lower + user_boot_mbi->mem_upper;
+    }
+
+    if (heap_is_ready()) {
+        used_bytes += heap_bytes_used();
+        free_bytes = heap_bytes_free();
+    } else if (total_kib > 1024u) {
+        u32 total_bytes = total_kib * 1024u;
+        if (total_bytes > kernel_bytes) {
+            free_bytes = total_bytes - kernel_bytes;
+        }
+    }
+
+    info->mem_total_kib = total_kib;
+    info->mem_used_kib = (used_bytes + 1023u) / 1024u;
+    if (total_kib > info->mem_used_kib) {
+        info->mem_free_kib = total_kib - info->mem_used_kib;
+    } else {
+        info->mem_free_kib = 0u;
+    }
+    info->mem_shared_kib = 0u;
+    info->mem_buff_cache_kib = 0u;
+    info->mem_available_kib = free_bytes / 1024u;
+    if (info->mem_available_kib > info->mem_free_kib) {
+        info->mem_available_kib = info->mem_free_kib;
+    }
+    info->swap_total_kib = 0u;
+    info->swap_used_kib = 0u;
+    info->swap_free_kib = 0u;
+    return 0;
+}
+
 static void ksys_exit(int code) {
     int pid = task_current_pid();
     if (pid > 0) {
@@ -283,9 +395,27 @@ int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5) {
         case SYS_GETPID:
             ret = ksys_getpid();
             break;
+        case SYS_MKDIR:
+            ret = ksys_mkdir((const char *)a1);
+            break;
+        case SYS_GETCWD:
+            ret = ksys_getcwd((char *)a1, a2);
+            break;
         case SYS_EXIT:
             ksys_exit((int)a1);
             ret = 0;
+            break;
+        case SYS_LIST:
+            ret = ksys_list((const char *)a1);
+            break;
+        case SYS_SYSTEMINFO:
+            ret = ksys_systeminfo();
+            break;
+        case SYS_PS:
+            ret = ksys_ps();
+            break;
+        case SYS_MEMINFO:
+            ret = ksys_meminfo((struct mem_info *)a1);
             break;
         case SYS_RET_KERNEL:
             ret = 0;
@@ -344,6 +474,16 @@ int sys_getpid(void) {
         "int $0x80"
         : "=a"(ret)
         : "a"(SYS_GETPID)
+        : "memory");
+    return ret;
+}
+
+int sys_meminfo(struct mem_info *info) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYS_MEMINFO), "b"(info)
         : "memory");
     return ret;
 }

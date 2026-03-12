@@ -164,6 +164,18 @@ static int atapi_read_blocks(void *ctx, u32 lba, u32 count, void *out_buf) {
             dst[(block * ATAPI_SECTOR_SIZE) + (i * 2u)] = (u8)(w & 0xFFu);
             dst[(block * ATAPI_SECTOR_SIZE) + (i * 2u) + 1u] = (u8)((w >> 8) & 0xFFu);
         }
+
+        /* Complete PACKET command before issuing the next one. Some drives
+           keep BSY/DRQ transiently asserted after the data phase. */
+        if (!ata_wait_not_busy(dev->io_base, 200000u)) {
+            return 0;
+        }
+        {
+            u8 s = inb((u16)(dev->io_base + ATA_REG_STATUS));
+            if ((s & (ATA_SR_ERR | ATA_SR_DF)) != 0u) {
+                return 0;
+            }
+        }
     }
 
     return 1;

@@ -4,13 +4,20 @@ struct exec_program {
     const char *path;
     int (*entry)(int argc, char **argv, struct exec_context *ctx);
 };
-
-extern const u8 _binary_build_user_hello_elf_start[];
-extern const u8 _binary_build_user_hello_elf_end[];
-extern const u8 _binary_build_user_cat_elf_start[];
-extern const u8 _binary_build_user_cat_elf_end[];
-extern const u8 _binary_build_user_touch_elf_start[];
-extern const u8 _binary_build_user_touch_elf_end[];
+static int exec_has_suffix(const char *s, const char *suffix) {
+    u32 s_len = str_len(s);
+    u32 suf_len = str_len(suffix);
+    u32 i;
+    if (s_len < suf_len) {
+        return 0;
+    }
+    for (i = 0u; i < suf_len; ++i) {
+        if (s[s_len - suf_len + i] != suffix[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 static int exec_is_elf_path(struct vfs_node *cwd, const char *path) {
     const char *data = (const char *)0;
@@ -24,40 +31,9 @@ static int exec_is_elf_path(struct vfs_node *cwd, const char *path) {
            (u8)data[3] == (u8)'F';
 }
 
-static int prog_pwd(int argc, char **argv, struct exec_context *ctx) {
-    char path[128];
-    (void)argc;
-    (void)argv;
-    vfs_get_cwd_path(*ctx->cwd, path, sizeof(path));
-    console_printf(ctx->output, "%s\n", path);
-    return 0;
-}
-
-static int prog_ls(int argc, char **argv, struct exec_context *ctx) {
-    if (argc >= 2) {
-        vfs_list(*ctx->cwd, argv[1], ctx->output);
-    } else {
-        vfs_list(*ctx->cwd, (const char *)0, ctx->output);
-    }
-    return 0;
-}
-
-static int prog_mkdir(int argc, char **argv, struct exec_context *ctx) {
-    if (argc < 2) {
-        console_print(ctx->output, "mkdir: usage mkdir PATH\n");
-        return -1;
-    }
-    if (!vfs_make_dir(*ctx->cwd, argv[1])) {
-        console_print(ctx->output, "mkdir: failed\n");
-        return -1;
-    }
-    return 0;
-}
-
-static int exec_run_elf_path(const char *path, int argc, char **argv, struct exec_context *ctx, int print_status) {
+static int exec_run_elf_path(const char *path, int argc, char **argv, struct exec_context *ctx) {
     struct proc_image image;
     int rc = -1;
-    int exit_code = -1;
     int pid;
     int ppid;
 
@@ -80,6 +56,7 @@ static int exec_run_elf_path(const char *path, int argc, char **argv, struct exe
     (void)proc_bind_image(pid, &image);
     proc_set_state(pid, PROC_RUNNING);
     syscall_set_user_cwd(*ctx->cwd);
+    syscall_set_bootinfo(ctx->mbi, ctx->magic);
 
     if (!elf_execute_image(&image, pid, argc, argv, &rc, ctx->output)) {
         (void)proc_exit(pid, -1);
@@ -87,29 +64,9 @@ static int exec_run_elf_path(const char *path, int argc, char **argv, struct exe
         return 0;
     }
     (void)proc_exit(pid, rc);
-    (void)proc_reap_pid(pid, &exit_code);
-
-    if (print_status) {
-        console_print(ctx->output, "run: ");
-        console_print(ctx->output, path);
-        console_print(ctx->output, " returned ");
-        if (exit_code < 0) {
-            console_print(ctx->output, "-");
-            console_print_u32_dec(ctx->output, (u32)(-exit_code));
-        } else {
-            console_print_u32_dec(ctx->output, (u32)exit_code);
-        }
-        console_putchar(ctx->output, '\n');
-    }
+    (void)proc_reap_pid(pid, (int *)0);
 
     return 1;
-}
-
-static int prog_systeminfo(int argc, char **argv, struct exec_context *ctx) {
-    (void)argc;
-    (void)argv;
-    print_systeminfo(ctx->mbi, ctx->magic);
-    return 0;
 }
 
 static int prog_mounts(int argc, char **argv, struct exec_context *ctx) {
@@ -117,21 +74,6 @@ static int prog_mounts(int argc, char **argv, struct exec_context *ctx) {
     (void)argv;
     fs_print_mounts(ctx->output);
     return 0;
-}
-
-static int prog_ps(int argc, char **argv, struct exec_context *ctx) {
-    (void)argc;
-    (void)argv;
-    task_list(ctx->output);
-    return 0;
-}
-
-static int prog_run(int argc, char **argv, struct exec_context *ctx) {
-    if (argc < 2) {
-        console_print(ctx->output, "run: usage run PATH\n");
-        return -1;
-    }
-    return exec_run_elf_path(argv[1], argc - 1, &argv[1], ctx, 1) ? 0 : -1;
 }
 
 static int prog_ring3test(int argc, char **argv, struct exec_context *ctx) {
@@ -145,41 +87,18 @@ static int prog_ring3test(int argc, char **argv, struct exec_context *ctx) {
 }
 
 static const struct exec_program programs[] = {
-    {"/bin/pwd", prog_pwd},
-    {"/bin/ls", prog_ls},
-    {"/bin/mkdir", prog_mkdir},
-    {"/bin/systeminfo", prog_systeminfo},
     {"/bin/mounts", prog_mounts},
-    {"/bin/ps", prog_ps},
-    {"/bin/run", prog_run},
     {"/bin/ring3test", prog_ring3test}
 };
 
-void exec_seed_programs(void) {
-    u32 i;
-    const char *seed =
-        "#!slop-exec\n"
-        "stub user-program placeholder\n";
-    for (i = 0; i < (sizeof(programs) / sizeof(programs[0])); ++i) {
-        const struct exec_program *p = &programs[i];
-        (void)vfs_write_file(vfs_root(), p->path, seed, str_len(seed));
-    }
-    {
-        u32 size = (u32)(_binary_build_user_hello_elf_end - _binary_build_user_hello_elf_start);
-        (void)vfs_write_file(vfs_root(), "/bin/hello.elf", (const char *)_binary_build_user_hello_elf_start, size);
-    }
-    {
-        u32 size = (u32)(_binary_build_user_cat_elf_end - _binary_build_user_cat_elf_start);
-        (void)vfs_write_file(vfs_root(), "/bin/cat", (const char *)_binary_build_user_cat_elf_start, size);
-    }
-    {
-        u32 size = (u32)(_binary_build_user_touch_elf_end - _binary_build_user_touch_elf_start);
-        (void)vfs_write_file(vfs_root(), "/bin/touch", (const char *)_binary_build_user_touch_elf_start, size);
-    }
+int exec_seed_programs(void) {
+    return 0;
 }
 
 int exec_run_path(const char *path, int argc, char **argv, struct exec_context *ctx) {
     u32 i;
+    char alt_path[128];
+    u32 j;
     for (i = 0; i < (sizeof(programs) / sizeof(programs[0])); ++i) {
         const struct exec_program *p = &programs[i];
         if (str_eq(path, p->path)) {
@@ -187,8 +106,54 @@ int exec_run_path(const char *path, int argc, char **argv, struct exec_context *
             return 1;
         }
     }
-    if (exec_is_elf_path(*ctx->cwd, path) && exec_run_elf_path(path, argc, argv, ctx, 0)) {
-        return 1;
+
+    if (exec_is_elf_path(*ctx->cwd, path)) {
+        return exec_run_elf_path(path, argc, argv, ctx) ? 1 : -1;
     }
+
+    if (!exec_has_suffix(path, ".elf")) {
+        str_copy(alt_path, path, sizeof(alt_path));
+        j = str_len(alt_path);
+        if (j + 4u < sizeof(alt_path)) {
+            alt_path[j++] = '.';
+            alt_path[j++] = 'e';
+            alt_path[j++] = 'l';
+            alt_path[j++] = 'f';
+            alt_path[j] = '\0';
+            if (exec_is_elf_path(*ctx->cwd, alt_path)) {
+                return exec_run_elf_path(alt_path, argc, argv, ctx) ? 1 : -1;
+            }
+        }
+    }
+
+    if (str_startswith(path, "/bin/")) {
+        str_copy(alt_path, "/mount/cdrom", sizeof(alt_path));
+        j = str_len(alt_path);
+        {
+            u32 k = 0u;
+            while (path[k] != '\0' && (j + 1u) < sizeof(alt_path)) {
+                alt_path[j++] = path[k++];
+            }
+            alt_path[j] = '\0';
+        }
+        if (exec_is_elf_path(*ctx->cwd, alt_path)) {
+            return exec_run_elf_path(alt_path, argc, argv, ctx) ? 1 : -1;
+        }
+
+        if (!exec_has_suffix(alt_path, ".elf")) {
+            j = str_len(alt_path);
+            if (j + 4u < sizeof(alt_path)) {
+                alt_path[j++] = '.';
+                alt_path[j++] = 'e';
+                alt_path[j++] = 'l';
+                alt_path[j++] = 'f';
+                alt_path[j] = '\0';
+                if (exec_is_elf_path(*ctx->cwd, alt_path)) {
+                    return exec_run_elf_path(alt_path, argc, argv, ctx) ? 1 : -1;
+                }
+            }
+        }
+    }
+
     return 0;
 }

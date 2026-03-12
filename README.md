@@ -17,25 +17,24 @@ The goal of this project is simple: to see how far vibecoding has come, and if i
 - Heap allocator
 - Kernel panics
 - Basic syscall ABI
-- Very basic ELF32 support (with ``cat``, ``touch``, and ``hello.elf`` being real ELF files)
+- Very basic ELF32 support (with ``cat``, ``touch``, ``ls``, ``pwd``, ``mkdir``, ``ps``, and ``systeminfo`` as real ELF files)
 - Basic in-memory VFS
-- Block device registry & IDE/ATAPI CD groundwork
+- Block device registry + IDE/ATAPI CD + read-only ISO9660 file loading (`/mount/cdrom`)
 
 ## Minimum Hardware Profile
 - CPU: Intel 80486 (baseline target).
-- RAM: 2 MB target baseline.
+- RAM: 4 MB target baseline.
 - Video: text-mode console baseline.
 
 Notes:
-- GRUB is unstable at 2 MB of RAM so you'll need to load the boot entry twice to load into SLOP... (a custom bootloader is in the plans)
 - You cannot boot from a floppy (yet), so most real 486 systems probably can't load this
-- Tested on v86 and QEMU.
+- Tested on v86 and QEMU so far (nothing else)
 
 ## Build and Run
 Requirements:
 - `nasm`
 - `make` (or `mingw32-make` on native Windows)
-- `i686-elf-gcc`, `i686-elf-ld`, `i686-elf-objcopy`
+- `i686-elf-gcc`, `i686-elf-ld`
 - `grub-mkrescue` (+ backend tooling such as `xorriso`)
 - `qemu-system-i386`
 

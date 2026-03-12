@@ -21,18 +21,31 @@ syscall_stub:
     pushad
 
     mov eax, [esp + 28]
-    cmp dword [ring3_active], 1
-    jne .dispatch
+    mov ecx, [esp + 36]
+    and ecx, 0x3
     cmp eax, 60
     je .return_from_user_exit
     cmp eax, 240
-    jne .dispatch
-    mov dword [ring3_exit_code], 0
-    jmp .return_to_kernel
+    je .return_ret_kernel
+    jmp .dispatch
 
 .return_from_user_exit:
+    cmp ecx, 0x3
+    je .return_from_user_exit_do
+    cmp dword [ring3_active], 1
+    jne .dispatch
+.return_from_user_exit_do:
     mov ecx, [esp + 16]
     mov [ring3_exit_code], ecx
+    jmp .return_to_kernel
+
+.return_ret_kernel:
+    cmp ecx, 0x3
+    je .return_ret_kernel_do
+    cmp dword [ring3_active], 1
+    jne .dispatch
+.return_ret_kernel_do:
+    mov dword [ring3_exit_code], 0
 
 .return_to_kernel:
     mov dword [ring3_active], 0

@@ -1,7 +1,6 @@
 NASM ?= nasm
 CC ?= i686-elf-gcc
 LD ?= i686-elf-ld
-OBJCOPY ?= i686-elf-objcopy
 GRUB_MKRESCUE ?= grub-mkrescue
 QEMU ?= qemu-system-i386
 QEMU_OPTS ?= -accel tcg,thread=single -icount auto,sleep=on
@@ -41,16 +40,12 @@ KERNEL_GENERIC_C_SRCS := $(wildcard $(KERNEL_DIR)/*.c)
 KERNEL_ARCH_C_SRCS := $(wildcard $(ARCH_DIR)/*.c)
 KERNEL_C_SRCS := $(KERNEL_GENERIC_C_SRCS) $(KERNEL_ARCH_C_SRCS)
 KERNEL_C_OBJ := $(patsubst $(KERNEL_DIR)/%.c,$(OBJ_DIR)/%.o,$(KERNEL_C_SRCS))
+
+USER_PROGS := cat touch ls pwd mkdir ps systeminfo free
 USER_CRT0_OBJ := $(USER_BUILD_DIR)/crt0.o
-USER_HELLO_OBJ := $(USER_BUILD_DIR)/hello.o
-USER_HELLO_ELF := $(USER_BUILD_DIR)/hello.elf
-USER_HELLO_BLOB_OBJ := $(OBJ_DIR)/hello_elf_blob.o
-USER_CAT_OBJ := $(USER_BUILD_DIR)/cat.o
-USER_CAT_ELF := $(USER_BUILD_DIR)/cat.elf
-USER_CAT_BLOB_OBJ := $(OBJ_DIR)/cat_elf_blob.o
-USER_TOUCH_OBJ := $(USER_BUILD_DIR)/touch.o
-USER_TOUCH_ELF := $(USER_BUILD_DIR)/touch.elf
-USER_TOUCH_BLOB_OBJ := $(OBJ_DIR)/touch_elf_blob.o
+USER_PROG_OBJ := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .o,$(USER_PROGS)))
+USER_PROG_ELF := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .elf,$(USER_PROGS)))
+ISO_USER_BIN := $(addprefix $(ISO_ROOT)/bin/,$(USER_PROGS))
 
 ifeq ($(OS),Windows_NT)
 SHELL := cmd
@@ -84,50 +79,29 @@ $(OBJ_DIR)/%.o: $(KERNEL_DIR)/%.c | $(OBJ_DIR)
 $(USER_CRT0_OBJ): user/crt0.asm | $(USER_BUILD_DIR)
 	$(NASM) -f elf32 -o $@ $<
 
-$(USER_HELLO_OBJ): user/hello.c | $(USER_BUILD_DIR)
+$(USER_BUILD_DIR)/%.o: user/%.c | $(USER_BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -c -o $@ $<
 
-$(USER_HELLO_ELF): $(USER_CRT0_OBJ) $(USER_HELLO_OBJ) user/linker.ld | $(USER_BUILD_DIR)
-	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_HELLO_OBJ)
+$(USER_BUILD_DIR)/%.elf: $(USER_CRT0_OBJ) $(USER_BUILD_DIR)/%.o user/linker.ld | $(USER_BUILD_DIR)
+	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_BUILD_DIR)/$*.o
 
-$(USER_HELLO_BLOB_OBJ): $(USER_HELLO_ELF) | $(OBJ_DIR)
-	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@
+$(ISO_ROOT)/bin/%: $(USER_BUILD_DIR)/%.elf | $(BUILD_DIR)
+	$(call MKDIR_P,$(ISO_ROOT)/bin)
+	$(call COPY_FILE,$<,$@)
 
-$(USER_CAT_OBJ): user/cat.c | $(USER_BUILD_DIR)
-	$(CC) $(USER_CFLAGS) -c -o $@ $<
+$(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) -o $@ $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ)
 
-$(USER_CAT_ELF): $(USER_CRT0_OBJ) $(USER_CAT_OBJ) user/linker.ld | $(USER_BUILD_DIR)
-	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_CAT_OBJ)
+$(KERNEL_FB_ELF): $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) -o $@ $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ)
 
-$(USER_CAT_BLOB_OBJ): $(USER_CAT_ELF) | $(OBJ_DIR)
-	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@
-
-$(USER_TOUCH_OBJ): user/touch.c | $(USER_BUILD_DIR)
-	$(CC) $(USER_CFLAGS) -c -o $@ $<
-
-$(USER_TOUCH_ELF): $(USER_CRT0_OBJ) $(USER_TOUCH_OBJ) user/linker.ld | $(USER_BUILD_DIR)
-	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_TOUCH_OBJ)
-
-$(USER_TOUCH_BLOB_OBJ): $(USER_TOUCH_ELF) | $(OBJ_DIR)
-	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@
-
-USER_BLOB_OBJ := $(USER_HELLO_BLOB_OBJ) $(USER_CAT_BLOB_OBJ) $(USER_TOUCH_BLOB_OBJ)
-
-$(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) $(USER_BLOB_OBJ) linker.ld | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) -o $@ $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) $(USER_BLOB_OBJ)
-
-$(KERNEL_FB_ELF): $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) $(USER_BLOB_OBJ) linker.ld | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) -o $@ $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) $(USER_BLOB_OBJ)
-
-$(ISO_IMAGE): $(KERNEL_ELF) iso/boot/grub/grub.cfg | $(BUILD_DIR)
-	$(call RM_RF,$(ISO_ROOT))
+$(ISO_IMAGE): $(KERNEL_ELF) iso/boot/grub/grub.cfg $(ISO_USER_BIN) | $(BUILD_DIR)
 	$(call MKDIR_P,$(ISO_ROOT)/boot/grub)
 	$(call COPY_FILE,$(KERNEL_ELF),$(ISO_ROOT)/boot/slop-kernel.elf)
 	$(call COPY_FILE,iso/boot/grub/grub.cfg,$(ISO_ROOT)/boot/grub/grub.cfg)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_ROOT)
 
-$(ISO_FB_IMAGE): $(KERNEL_FB_ELF) iso/boot/grub/grub_fb.cfg | $(BUILD_DIR)
-	$(call RM_RF,$(ISO_ROOT))
+$(ISO_FB_IMAGE): $(KERNEL_FB_ELF) iso/boot/grub/grub_fb.cfg $(ISO_USER_BIN) | $(BUILD_DIR)
 	$(call MKDIR_P,$(ISO_ROOT)/boot/grub)
 	$(call COPY_FILE,$(KERNEL_FB_ELF),$(ISO_ROOT)/boot/slop-kernel-fb.elf)
 	$(call COPY_FILE,iso/boot/grub/grub_fb.cfg,$(ISO_ROOT)/boot/grub/grub.cfg)

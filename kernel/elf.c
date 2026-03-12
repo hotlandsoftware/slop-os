@@ -1,6 +1,7 @@
 #include "kernel.h"
 
 #define ELF_USER_IMAGE_MAX (128u * 1024u)
+#define ELF_USER_IMAGE_BASE 0x00300000u
 #define ELF_MAGIC0 0x7Fu
 #define ELF_MAGIC1 'E'
 #define ELF_MAGIC2 'L'
@@ -43,7 +44,6 @@ struct elf32_phdr {
     u32 p_align;
 } __attribute__((packed));
 
-static u8 user_images[ELF_PROC_SLOTS][ELF_USER_IMAGE_MAX];
 static u8 user_stacks[ELF_PROC_SLOTS][ELF_STACK_SIZE];
 static int slot_owner_pid[ELF_PROC_SLOTS];
 static int slots_initialized = 0;
@@ -121,7 +121,6 @@ int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct pr
     u32 max_end = 0u;
     int load_count = 0;
     int slot;
-    u8 *user_image;
 
     if (!out_image || pid < 0 || !vfs_read_file(cwd, path, &data, &size) || !data) {
         console_print(target, "run: file not found\n");
@@ -133,7 +132,6 @@ int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct pr
         console_print(target, "run: no free process image slots\n");
         return 0;
     }
-    user_image = &user_images[slot][0];
 
     eh = (const struct elf32_ehdr *)data;
     if (!elf_validate_header(eh, size, target)) {
@@ -164,30 +162,33 @@ int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct pr
         return 0;
     }
 
+    if (min_vaddr < ELF_USER_IMAGE_BASE || max_end > (ELF_USER_IMAGE_BASE + ELF_USER_IMAGE_MAX)) {
+        console_print(target, "run: image outside reserved user range\n");
+        return 0;
+    }
+
     if ((max_end - min_vaddr) > ELF_USER_IMAGE_MAX) {
         console_print(target, "run: image too large for user buffer\n");
         return 0;
     }
 
-    mem_zero(user_image, ELF_USER_IMAGE_MAX);
+    mem_zero((void *)ELF_USER_IMAGE_BASE, ELF_USER_IMAGE_MAX);
 
     for (i = 0; i < eh->e_phnum; ++i) {
         const struct elf32_phdr *p = &ph[i];
-        u32 dst_off;
         u32 j;
         if (p->p_type != PT_LOAD) {
             continue;
         }
-        dst_off = p->p_vaddr - min_vaddr;
         for (j = 0; j < p->p_filesz; ++j) {
-            user_image[dst_off + j] = (u8)data[p->p_offset + j];
+            ((u8 *)p->p_vaddr)[j] = (u8)data[p->p_offset + j];
         }
     }
 
     out_image->loaded = 1;
-    out_image->image_base = (u32)user_image;
+    out_image->image_base = min_vaddr;
     out_image->image_size = (max_end - min_vaddr);
-    out_image->entry = out_image->image_base + (eh->e_entry - min_vaddr);
+    out_image->entry = eh->e_entry;
     out_image->user_stack_base = (u32)&user_stacks[slot][0];
     out_image->user_stack_size = ELF_STACK_SIZE;
     return 1;
