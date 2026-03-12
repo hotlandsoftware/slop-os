@@ -52,3 +52,4 @@ New session
 
 - ``/bin/`` is now loaded from the CD-ROM.
 - ``free`` command (free memory) added.
+- Decision made to switch from a microkernel aspiration to a hybrid kernel model for ease
