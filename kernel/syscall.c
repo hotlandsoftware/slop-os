@@ -2,6 +2,7 @@
 
 #define SYSCALL_WRITE_MAX 1024u
 #define ERR_BADF (-9)
+#define ERR_AGAIN (-11)
 #define ERR_FAULT (-14)
 #define ERR_INVAL (-22)
 #define ERR_NFILE (-24)
@@ -21,6 +22,36 @@ static struct fd_entry fd_table[16];
 static struct vfs_node *user_cwd = (struct vfs_node *)0;
 static const struct multiboot_info *user_boot_mbi = (const struct multiboot_info *)0;
 static u32 user_boot_magic = 0u;
+
+void syscall_save_yield_context(const u32 *frame_base) {
+    struct proc_image image;
+    int pid;
+
+    if (!frame_base) {
+        return;
+    }
+
+    pid = (int)ring3_current_pid;
+    if (pid <= 0 || !proc_get_image(pid, &image) || !image.loaded) {
+        return;
+    }
+
+    image.context.edi = frame_base[0];
+    image.context.esi = frame_base[1];
+    image.context.ebp = frame_base[2];
+    image.context.esp_dummy = frame_base[3];
+    image.context.ebx = frame_base[4];
+    image.context.edx = frame_base[5];
+    image.context.ecx = frame_base[6];
+    image.context.eax = 0u;
+    image.context.eip = frame_base[8];
+    image.context.cs = frame_base[9];
+    image.context.eflags = frame_base[10];
+    image.context.user_esp = frame_base[11];
+    image.context.user_ss = frame_base[12];
+    image.context_valid = 1;
+    (void)proc_bind_image(pid, &image);
+}
 
 void syscall_set_user_cwd(struct vfs_node *cwd) {
     user_cwd = cwd;
@@ -352,6 +383,52 @@ static int ksys_meminfo(struct mem_info *info) {
     return 0;
 }
 
+static int ksys_ipc_send(struct ipc_message *msg) {
+    struct ipc_message kmsg;
+    int src_pid = (int)ring3_current_pid;
+
+    if (!msg || !validate_user_ptr(msg, sizeof(*msg))) {
+        return ERR_FAULT;
+    }
+    kmsg = *msg;
+    if (!ipc_send(src_pid, kmsg.dst_pid, &kmsg)) {
+        return ERR_AGAIN;
+    }
+    return 0;
+}
+
+static int ksys_ipc_recv(struct ipc_message *msg) {
+    struct ipc_message kmsg;
+    int dst_pid = (int)ring3_current_pid;
+
+    if (!msg || !validate_user_ptr(msg, sizeof(*msg))) {
+        return ERR_FAULT;
+    }
+    if (!ipc_recv(dst_pid, &kmsg)) {
+        return ERR_AGAIN;
+    }
+    *msg = kmsg;
+    return 0;
+}
+
+static int ksys_ipc_reply(struct ipc_message *msg) {
+    struct ipc_message kmsg;
+    int src_pid = (int)ring3_current_pid;
+
+    if (!msg || !validate_user_ptr(msg, sizeof(*msg))) {
+        return ERR_FAULT;
+    }
+    kmsg = *msg;
+    if (!ipc_reply(src_pid, kmsg.dst_pid, &kmsg)) {
+        return ERR_AGAIN;
+    }
+    return 0;
+}
+
+static int ksys_yield(void) {
+    return 0;
+}
+
 static void ksys_exit(int code) {
     int pid = task_current_pid();
     if (pid > 0) {
@@ -416,6 +493,18 @@ int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5) {
             break;
         case SYS_MEMINFO:
             ret = ksys_meminfo((struct mem_info *)a1);
+            break;
+        case SYS_IPC_SEND:
+            ret = ksys_ipc_send((struct ipc_message *)a1);
+            break;
+        case SYS_IPC_RECV:
+            ret = ksys_ipc_recv((struct ipc_message *)a1);
+            break;
+        case SYS_IPC_REPLY:
+            ret = ksys_ipc_reply((struct ipc_message *)a1);
+            break;
+        case SYS_YIELD:
+            ret = ksys_yield();
             break;
         case SYS_RET_KERNEL:
             ret = 0;
@@ -484,6 +573,46 @@ int sys_meminfo(struct mem_info *info) {
         "int $0x80"
         : "=a"(ret)
         : "a"(SYS_MEMINFO), "b"(info)
+        : "memory");
+    return ret;
+}
+
+int sys_ipc_send(struct ipc_message *msg) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYS_IPC_SEND), "b"(msg)
+        : "memory");
+    return ret;
+}
+
+int sys_ipc_recv(struct ipc_message *msg) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYS_IPC_RECV), "b"(msg)
+        : "memory");
+    return ret;
+}
+
+int sys_ipc_reply(struct ipc_message *msg) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYS_IPC_REPLY), "b"(msg)
+        : "memory");
+    return ret;
+}
+
+int sys_yield(void) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(SYS_YIELD)
         : "memory");
     return ret;
 }

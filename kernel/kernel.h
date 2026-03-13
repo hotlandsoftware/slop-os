@@ -51,6 +51,7 @@ enum console_target {
 };
 
 struct vfs_node;
+struct fs_dir_entry;
 
 typedef int (*block_read_fn)(void *ctx, u32 lba, u32 count, void *out_buf);
 
@@ -62,11 +63,19 @@ struct block_device {
     void *ctx;
 };
 
+struct fs_ops {
+    int (*read_file)(int device_id, const char *path, char **out_data, u32 *out_size);
+    int (*list_dir)(int device_id, const char *path, enum console_target target);
+    int (*path_is_dir)(int device_id, const char *path);
+    int (*list_dir_entries)(int device_id, const char *path, struct fs_dir_entry *entries, u32 max_entries, u32 *out_count);
+};
+
 struct mount_entry {
     int used;
     char path[16];
     char fs_name[16];
     int device_id;
+    const struct fs_ops *ops;
 };
 
 #define FS_DIRENT_NAME_MAX 63
@@ -108,6 +117,10 @@ enum syscall_id {
     SYS_SYSTEMINFO = 242,
     SYS_PS = 243,
     SYS_MEMINFO = 244,
+    SYS_IPC_SEND = 245,
+    SYS_IPC_RECV = 246,
+    SYS_IPC_REPLY = 247,
+    SYS_YIELD = 248,
     SYS_RET_KERNEL = 240
 };
 
@@ -123,11 +136,56 @@ struct mem_info {
     u32 swap_free_kib;
 };
 
+struct ipc_message {
+    int src_pid;
+    int dst_pid;
+    u32 type;
+    u32 arg1;
+    u32 arg2;
+    u32 arg3;
+    u32 arg4;
+};
+
+struct user_context {
+    u32 edi;
+    u32 esi;
+    u32 ebp;
+    u32 esp_dummy;
+    u32 ebx;
+    u32 edx;
+    u32 ecx;
+    u32 eax;
+    u32 eip;
+    u32 cs;
+    u32 eflags;
+    u32 user_esp;
+    u32 user_ss;
+};
+
 struct exec_context {
     enum console_target output;
     struct vfs_node **cwd;
     const struct multiboot_info *mbi;
     u32 magic;
+};
+
+#define EXEC_MAX_SEGMENTS 8
+
+struct exec_segment {
+    u32 file_offset;
+    u32 file_size;
+    u32 mem_size;
+    u32 vaddr;
+    u32 flags;
+};
+
+struct exec_load_plan {
+    int valid;
+    u32 entry;
+    u32 image_base;
+    u32 image_size;
+    u32 segment_count;
+    struct exec_segment segments[EXEC_MAX_SEGMENTS];
 };
 
 enum task_state {
@@ -169,6 +227,8 @@ struct proc_image {
     u32 image_size;
     u32 user_stack_base;
     u32 user_stack_size;
+    int context_valid;
+    struct user_context context;
 };
 
 void term_init(void);
@@ -217,6 +277,7 @@ void cpu_relax_wait(void);
 void protection_init(void);
 void tss_set_kernel_stack(u32 esp0);
 int enter_user_mode(u32 entry, u32 user_stack);
+int resume_user_mode(const struct user_context *context);
 int ring3_test(enum console_target target);
 
 void serial_init(void);
@@ -234,6 +295,10 @@ int sys_open(const char *path, u32 flags);
 int sys_close(int fd);
 int sys_getpid(void);
 int sys_meminfo(struct mem_info *info);
+int sys_ipc_send(struct ipc_message *msg);
+int sys_ipc_recv(struct ipc_message *msg);
+int sys_ipc_reply(struct ipc_message *msg);
+int sys_yield(void);
 void sys_exit(int code);
 int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5);
 void syscall_set_user_cwd(struct vfs_node *cwd);
@@ -259,8 +324,15 @@ int proc_bind_image(int pid, const struct proc_image *image);
 int proc_get_image(int pid, struct proc_image *image);
 int proc_reap_pid(int pid, int *exit_code);
 
-int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct proc_image *out_image, enum console_target target);
+void ipc_init(void);
+int ipc_send(int src_pid, int dst_pid, const struct ipc_message *msg);
+int ipc_recv(int dst_pid, struct ipc_message *out_msg);
+int ipc_reply(int src_pid, int dst_pid, const struct ipc_message *msg);
+
+int elf_prepare_load_plan_from_vfs(struct vfs_node *cwd, const char *path, struct exec_load_plan *out_plan, enum console_target target);
+int elf_load_from_plan(int pid, const struct exec_load_plan *plan, const char *file_data, u32 file_size, struct proc_image *out_image, enum console_target target);
 int elf_execute_image(const struct proc_image *image, int pid, int argc, char **argv, int *ret_value, enum console_target target);
+int elf_resume_image(const struct proc_image *image, int pid, int *ret_value, enum console_target target);
 
 void heap_init(const struct multiboot_info *mbi, u32 magic);
 void *kmalloc(size_t size);

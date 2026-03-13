@@ -41,7 +41,7 @@ KERNEL_ARCH_C_SRCS := $(wildcard $(ARCH_DIR)/*.c)
 KERNEL_C_SRCS := $(KERNEL_GENERIC_C_SRCS) $(KERNEL_ARCH_C_SRCS)
 KERNEL_C_OBJ := $(patsubst $(KERNEL_DIR)/%.c,$(OBJ_DIR)/%.o,$(KERNEL_C_SRCS))
 
-USER_PROGS := cat touch ls pwd mkdir ps systeminfo free
+USER_PROGS := cat touch ls pwd mkdir ps systeminfo free ipc_recv ipc_send ipc_selftest yieldtest
 USER_CRT0_OBJ := $(USER_BUILD_DIR)/crt0.o
 USER_PROG_OBJ := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .o,$(USER_PROGS)))
 USER_PROG_ELF := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .elf,$(USER_PROGS)))

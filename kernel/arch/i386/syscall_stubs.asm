@@ -4,9 +4,11 @@ section .text
 global syscall_stub
 
 extern syscall_entry
+extern syscall_save_yield_context
 extern ring3_active
 extern ring3_current_pid
 extern ring3_return_esp
+extern ring3_stop_reason
 extern ring3_resume_from_user
 extern ring3_exit_code
 
@@ -27,6 +29,8 @@ syscall_stub:
     je .return_from_user_exit
     cmp eax, 240
     je .return_ret_kernel
+    cmp eax, 248
+    je .return_yield
     jmp .dispatch
 
 .return_from_user_exit:
@@ -46,6 +50,20 @@ syscall_stub:
     jne .dispatch
 .return_ret_kernel_do:
     mov dword [ring3_exit_code], 0
+    mov dword [ring3_stop_reason], 2
+    jmp .return_to_kernel
+
+.return_yield:
+    cmp ecx, 0x3
+    je .return_yield_do
+    cmp dword [ring3_active], 1
+    jne .dispatch
+.return_yield_do:
+    push esp
+    call syscall_save_yield_context
+    add esp, 4
+    mov dword [ring3_exit_code], 0
+    mov dword [ring3_stop_reason], 1
 
 .return_to_kernel:
     mov dword [ring3_active], 0

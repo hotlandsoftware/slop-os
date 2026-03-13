@@ -15,6 +15,8 @@ void kmain(u32 magic, u32 mbi_addr) {
     term_print("kmain: heap ok\n");
     proc_init();
     term_print("kmain: proc ok\n");
+    ipc_init();
+    term_print("kmain: ipc ok\n");
     tasking_init();
     task_spawn_kernel("shell-vga", 0);
     task_spawn_kernel("shell-serial", 0);

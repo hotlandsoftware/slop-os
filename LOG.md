@@ -52,4 +52,12 @@ New session
 
 - ``/bin/`` is now loaded from the CD-ROM.
 - ``free`` command (free memory) added.
+
+### Day 5
 - Decision made to switch from a microkernel aspiration to a hybrid kernel model for ease
+
+---
+- Architecture direction has been clarified: SLOP is now explicitly targeting a hybrid-kernel design instead of forcing an immediate full microkernel split.
+- Added the first filesystem dispatch boundary via `fs_ops` tables on mounts, so VFS/mount helpers now call filesystem operations through an interface instead of hardcoding ISO9660 checks everywhere.
+- Added the first exec/loader boundary split: ELF parsing/validation now builds an `exec_load_plan`, and process startup consumes that plan separately. (ELF path still runs in kernel, but policy and mechanism are now separated enough to support later service-style refactors.)
+- Fixed a bug where binary names were truncated to 8 characters.

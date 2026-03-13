@@ -58,6 +58,7 @@ static u8 ring3_kernel_stack[32768];
 volatile u32 ring3_return_esp = 0;
 volatile u32 ring3_active = 0;
 volatile u32 ring3_current_pid = 0;
+volatile u32 ring3_stop_reason = 0;
 u32 ring3_kernel_stack_top = 0;
 u32 ring3_saved_ebx = 0;
 u32 ring3_saved_esi = 0;

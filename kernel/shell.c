@@ -71,7 +71,9 @@ static void shell_print_help(struct shell_context *ctx) {
     console_print(ctx->output, "  halt       - stop CPU\n");
     console_print(ctx->output, "Program-style commands (/bin/*):\n");
     console_print(ctx->output, "  ls [PATH], pwd, mkdir PATH, touch PATH\n");
-    console_print(ctx->output, "  cat PATH, systeminfo, ps, free, free2\n");
+    console_print(ctx->output, "  cat PATH, systeminfo, ps, free\n");
+    console_print(ctx->output, "  ipc_recv, ipc_send PID [TYPE] [ARG1] [ARG2]\n");
+    console_print(ctx->output, "  ipc_selftest, yieldtest\n");
     console_print(ctx->output, "  mounts, ring3test\n");
     console_print(ctx->output, "  tip: try ls /mount/cdrom and cat /mount/cdrom/...\n");
     console_print(ctx->output, "Shell builtins:\n");

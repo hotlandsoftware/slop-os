@@ -49,6 +49,7 @@ static int slot_owner_pid[ELF_PROC_SLOTS];
 static int slots_initialized = 0;
 
 extern volatile u32 ring3_current_pid;
+extern volatile u32 ring3_stop_reason;
 
 static void elf_slots_init_once(void) {
     u32 i;
@@ -111,7 +112,7 @@ static int elf_validate_header(const struct elf32_ehdr *eh, u32 size, enum conso
     return 1;
 }
 
-int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct proc_image *out_image, enum console_target target) {
+int elf_prepare_load_plan_from_vfs(struct vfs_node *cwd, const char *path, struct exec_load_plan *out_plan, enum console_target target) {
     const char *data;
     u32 size;
     const struct elf32_ehdr *eh;
@@ -120,18 +121,17 @@ int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct pr
     u32 min_vaddr = 0xFFFFFFFFu;
     u32 max_end = 0u;
     int load_count = 0;
-    int slot;
+    u32 seg_index = 0u;
 
-    if (!out_image || pid < 0 || !vfs_read_file(cwd, path, &data, &size) || !data) {
+    if (!out_plan || !vfs_read_file(cwd, path, &data, &size) || !data) {
         console_print(target, "run: file not found\n");
         return 0;
     }
-
-    slot = elf_slot_for_pid(pid);
-    if (slot < 0) {
-        console_print(target, "run: no free process image slots\n");
-        return 0;
-    }
+    out_plan->valid = 0;
+    out_plan->segment_count = 0u;
+    out_plan->entry = 0u;
+    out_plan->image_base = 0u;
+    out_plan->image_size = 0u;
 
     eh = (const struct elf32_ehdr *)data;
     if (!elf_validate_header(eh, size, target)) {
@@ -148,12 +148,22 @@ int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct pr
             console_print(target, "run: invalid PT_LOAD segment\n");
             return 0;
         }
+        if (seg_index >= EXEC_MAX_SEGMENTS) {
+            console_print(target, "run: too many load segments\n");
+            return 0;
+        }
         if (p->p_vaddr < min_vaddr) {
             min_vaddr = p->p_vaddr;
         }
         if (p->p_vaddr + p->p_memsz > max_end) {
             max_end = p->p_vaddr + p->p_memsz;
         }
+        out_plan->segments[seg_index].file_offset = p->p_offset;
+        out_plan->segments[seg_index].file_size = p->p_filesz;
+        out_plan->segments[seg_index].mem_size = p->p_memsz;
+        out_plan->segments[seg_index].vaddr = p->p_vaddr;
+        out_plan->segments[seg_index].flags = p->p_flags;
+        ++seg_index;
         ++load_count;
     }
 
@@ -172,25 +182,57 @@ int elf_load_from_vfs(struct vfs_node *cwd, const char *path, int pid, struct pr
         return 0;
     }
 
+    out_plan->valid = 1;
+    out_plan->entry = eh->e_entry;
+    out_plan->image_base = min_vaddr;
+    out_plan->image_size = (max_end - min_vaddr);
+    out_plan->segment_count = seg_index;
+    return 1;
+}
+
+int elf_load_from_plan(int pid, const struct exec_load_plan *plan, const char *file_data, u32 file_size, struct proc_image *out_image, enum console_target target) {
+    u32 i;
+    int slot;
+
+    if (!plan || !plan->valid || !file_data || !out_image || pid < 0) {
+        console_print(target, "run: invalid load plan\n");
+        return 0;
+    }
+
+    if ((plan->image_base < ELF_USER_IMAGE_BASE) ||
+        (plan->image_base + plan->image_size) > (ELF_USER_IMAGE_BASE + ELF_USER_IMAGE_MAX)) {
+        console_print(target, "run: image outside reserved user range\n");
+        return 0;
+    }
+
+    slot = elf_slot_for_pid(pid);
+    if (slot < 0) {
+        console_print(target, "run: no free process image slots\n");
+        return 0;
+    }
+
     mem_zero((void *)ELF_USER_IMAGE_BASE, ELF_USER_IMAGE_MAX);
 
-    for (i = 0; i < eh->e_phnum; ++i) {
-        const struct elf32_phdr *p = &ph[i];
+    for (i = 0u; i < plan->segment_count; ++i) {
+        const struct exec_segment *seg = &plan->segments[i];
         u32 j;
-        if (p->p_type != PT_LOAD) {
-            continue;
+        if (seg->file_offset + seg->file_size > file_size) {
+            console_print(target, "run: segment file range out of bounds\n");
+            return 0;
         }
-        for (j = 0; j < p->p_filesz; ++j) {
-            ((u8 *)p->p_vaddr)[j] = (u8)data[p->p_offset + j];
+        for (j = 0; j < seg->file_size; ++j) {
+            ((u8 *)seg->vaddr)[j] = (u8)file_data[seg->file_offset + j];
         }
     }
 
     out_image->loaded = 1;
-    out_image->image_base = min_vaddr;
-    out_image->image_size = (max_end - min_vaddr);
-    out_image->entry = eh->e_entry;
+    out_image->image_base = plan->image_base;
+    out_image->image_size = plan->image_size;
+    out_image->entry = plan->entry;
     out_image->user_stack_base = (u32)&user_stacks[slot][0];
     out_image->user_stack_size = ELF_STACK_SIZE;
+    out_image->context_valid = 0;
+    mem_zero(&out_image->context, sizeof(out_image->context));
     return 1;
 }
 
@@ -265,6 +307,23 @@ int elf_execute_image(const struct proc_image *image, int pid, int argc, char **
 
     ring3_current_pid = (u32)pid;
     rc = enter_user_mode(image->entry, user_sp);
+    ring3_current_pid = 0u;
+    if (ret_value) {
+        *ret_value = rc;
+    }
+    return 1;
+}
+
+int elf_resume_image(const struct proc_image *image, int pid, int *ret_value, enum console_target target) {
+    int rc;
+
+    if (!image || !image->loaded || !image->context_valid || pid < 0) {
+        console_print(target, "run: no resumable image\n");
+        return 0;
+    }
+
+    ring3_current_pid = (u32)pid;
+    rc = resume_user_mode(&image->context);
     ring3_current_pid = 0u;
     if (ret_value) {
         *ret_value = rc;

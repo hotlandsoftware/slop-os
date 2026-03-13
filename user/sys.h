@@ -13,6 +13,16 @@ struct mem_info {
     unsigned int swap_free_kib;
 };
 
+struct ipc_message {
+    int src_pid;
+    int dst_pid;
+    unsigned int type;
+    unsigned int arg1;
+    unsigned int arg2;
+    unsigned int arg3;
+    unsigned int arg4;
+};
+
 static inline int sys_read(int fd, char *buf, unsigned int len) {
     int ret;
     __asm__ volatile (
@@ -73,6 +83,16 @@ static inline int sys_getcwd(char *buf, unsigned int len) {
     return ret;
 }
 
+static inline int sys_getpid(void) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(20)
+        : "memory");
+    return ret;
+}
+
 static inline int sys_list(const char *path) {
     int ret;
     __asm__ volatile (
@@ -109,6 +129,46 @@ static inline int sys_meminfo(struct mem_info *info) {
         "int $0x80"
         : "=a"(ret)
         : "a"(244), "b"(info)
+        : "memory");
+    return ret;
+}
+
+static inline int sys_ipc_send(struct ipc_message *msg) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(245), "b"(msg)
+        : "memory");
+    return ret;
+}
+
+static inline int sys_ipc_recv(struct ipc_message *msg) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(246), "b"(msg)
+        : "memory");
+    return ret;
+}
+
+static inline int sys_ipc_reply(struct ipc_message *msg) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(247), "b"(msg)
+        : "memory");
+    return ret;
+}
+
+static inline int sys_yield(void) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(248)
         : "memory");
     return ret;
 }

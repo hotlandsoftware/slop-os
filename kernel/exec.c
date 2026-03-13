@@ -1,5 +1,7 @@
 #include "kernel.h"
 
+extern volatile u32 ring3_stop_reason;
+
 struct exec_program {
     const char *path;
     int (*entry)(int argc, char **argv, struct exec_context *ctx);
@@ -32,6 +34,9 @@ static int exec_is_elf_path(struct vfs_node *cwd, const char *path) {
 }
 
 static int exec_run_elf_path(const char *path, int argc, char **argv, struct exec_context *ctx) {
+    const char *file_data = (const char *)0;
+    u32 file_size = 0u;
+    struct exec_load_plan plan;
     struct proc_image image;
     int rc = -1;
     int pid;
@@ -42,27 +47,58 @@ static int exec_run_elf_path(const char *path, int argc, char **argv, struct exe
         ppid = 0;
     }
 
+    if (!vfs_read_file(*ctx->cwd, path, &file_data, &file_size) || !file_data) {
+        console_print(ctx->output, "run: file not found\n");
+        return 0;
+    }
+
+    if (!elf_prepare_load_plan_from_vfs(*ctx->cwd, path, &plan, ctx->output)) {
+        return 0;
+    }
+
     pid = proc_spawn_kernel("userprog", ppid);
     if (pid < 0) {
         console_print(ctx->output, "run: failed to allocate process\n");
         return 0;
     }
 
-    if (!elf_load_from_vfs(*ctx->cwd, path, pid, &image, ctx->output)) {
+    if (!elf_load_from_plan(pid, &plan, file_data, file_size, &image, ctx->output)) {
         (void)proc_exit(pid, -1);
         (void)proc_reap_pid(pid, (int *)0);
         return 0;
     }
     (void)proc_bind_image(pid, &image);
-    proc_set_state(pid, PROC_RUNNING);
     syscall_set_user_cwd(*ctx->cwd);
     syscall_set_bootinfo(ctx->mbi, ctx->magic);
 
-    if (!elf_execute_image(&image, pid, argc, argv, &rc, ctx->output)) {
-        (void)proc_exit(pid, -1);
-        (void)proc_reap_pid(pid, (int *)0);
-        return 0;
+    for (;;) {
+        proc_set_state(pid, PROC_RUNNING);
+        if (image.context_valid) {
+            if (!elf_resume_image(&image, pid, &rc, ctx->output)) {
+                (void)proc_exit(pid, -1);
+                (void)proc_reap_pid(pid, (int *)0);
+                return 0;
+            }
+        } else {
+            if (!elf_execute_image(&image, pid, argc, argv, &rc, ctx->output)) {
+                (void)proc_exit(pid, -1);
+                (void)proc_reap_pid(pid, (int *)0);
+                return 0;
+            }
+        }
+
+        if (ring3_stop_reason == 1u) {
+            if (!proc_get_image(pid, &image)) {
+                (void)proc_exit(pid, -1);
+                (void)proc_reap_pid(pid, (int *)0);
+                return 0;
+            }
+            proc_set_state(pid, PROC_READY);
+            continue;
+        }
+        break;
     }
+
     (void)proc_exit(pid, rc);
     (void)proc_reap_pid(pid, (int *)0);
 

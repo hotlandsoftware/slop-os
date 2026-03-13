@@ -16,8 +16,27 @@ static u32 mounts_used = 0;
    during nested lookup paths from Ring 3 syscalls. */
 static u8 iso_sector_scratch[ISO_SECTOR_SIZE];
 
+static int iso_ops_read_file(int device_id, const char *path, char **out_data, u32 *out_size);
+static int iso_ops_list_dir(int device_id, const char *path, enum console_target target);
+static int iso_ops_path_is_dir(int device_id, const char *path);
+static int iso_ops_list_dir_entries(int device_id, const char *path, struct fs_dir_entry *entries, u32 max_entries, u32 *out_count);
+
+static const struct fs_ops iso9660_ops = {
+    iso_ops_read_file,
+    iso_ops_list_dir,
+    iso_ops_path_is_dir,
+    iso_ops_list_dir_entries
+};
+
+static const struct fs_ops *fs_ops_for_name(const char *fs_name) {
+    if (str_eq(fs_name, "iso9660")) {
+        return &iso9660_ops;
+    }
+    return (const struct fs_ops *)0;
+}
+
 static int is_known_fs(const char *fs_name) {
-    return str_eq(fs_name, "memfs") || str_eq(fs_name, "iso9660");
+    return str_eq(fs_name, "memfs") || fs_ops_for_name(fs_name) != (const struct fs_ops *)0;
 }
 
 static void mounts_reset(void) {
@@ -28,6 +47,7 @@ static void mounts_reset(void) {
         mounts[i].path[0] = '\0';
         mounts[i].fs_name[0] = '\0';
         mounts[i].device_id = -1;
+        mounts[i].ops = (const struct fs_ops *)0;
     }
 }
 
@@ -56,6 +76,72 @@ static char ascii_lower(char c) {
         return (char)(c - 'A' + 'a');
     }
     return c;
+}
+
+static u32 iso_system_use_offset(u32 name_len) {
+    u32 offset = 33u + name_len;
+    if ((name_len & 1u) == 0u) {
+        ++offset;
+    }
+    return offset;
+}
+
+static int names_match_casefold(const char *a, const char *b) {
+    u32 i = 0u;
+    while (a[i] != '\0' && b[i] != '\0') {
+        if (ascii_lower(a[i]) != ascii_lower(b[i])) {
+            return 0;
+        }
+        ++i;
+    }
+    return a[i] == '\0' && b[i] == '\0';
+}
+
+static int iso_try_read_rock_ridge_name(const u8 *rec, u32 rec_len, u32 name_len, char *out, u32 out_size) {
+    u32 off;
+    u32 out_len = 0u;
+
+    if (!rec || !out || out_size == 0u) {
+        return 0;
+    }
+
+    off = iso_system_use_offset(name_len);
+    if (off >= rec_len) {
+        return 0;
+    }
+
+    while (off + 4u <= rec_len) {
+        const u8 *entry = &rec[off];
+        u32 entry_len = entry[2];
+        u32 i;
+
+        if (entry_len < 4u || off + entry_len > rec_len) {
+            break;
+        }
+
+        if (entry[0] == 'N' && entry[1] == 'M' && entry_len >= 5u) {
+            u8 flags = entry[4];
+            if ((flags & 0x06u) != 0u) {
+                return 0;
+            }
+
+            for (i = 5u; i < entry_len; ++i) {
+                if (out_len + 1u >= out_size) {
+                    break;
+                }
+                out[out_len++] = ascii_lower((char)entry[i]);
+            }
+
+            if ((flags & 0x01u) == 0u && out_len > 0u) {
+                out[out_len] = '\0';
+                return 1;
+            }
+        }
+
+        off += entry_len;
+    }
+
+    return 0;
 }
 
 static void fs_print_list_entry(enum console_target target, const char *name, int is_dir) {
@@ -97,6 +183,16 @@ static int iso_name_matches(const u8 *rec_name, u32 rec_name_len, const char *co
     return component[j] == '\0';
 }
 
+static int iso_record_name_matches(const u8 *rec, u32 rec_len, const u8 *rec_name, u32 rec_name_len, const char *component) {
+    char rr_name[FS_DIRENT_NAME_MAX + 1];
+
+    if (iso_try_read_rock_ridge_name(rec, rec_len, rec_name_len, rr_name, sizeof(rr_name))) {
+        return names_match_casefold(rr_name, component);
+    }
+
+    return iso_name_matches(rec_name, rec_name_len, component);
+}
+
 static u32 iso_name_copy(const u8 *rec_name, u32 rec_name_len, char *out, u32 out_size) {
     u32 i = 0;
     u32 o = 0;
@@ -121,6 +217,14 @@ static u32 iso_name_copy(const u8 *rec_name, u32 rec_name_len, char *out, u32 ou
     }
     out[o] = '\0';
     return o;
+}
+
+static u32 iso_record_name_copy(const u8 *rec, u32 rec_len, const u8 *rec_name, u32 rec_name_len, char *out, u32 out_size) {
+    if (iso_try_read_rock_ridge_name(rec, rec_len, rec_name_len, out, out_size)) {
+        return str_len(out);
+    }
+
+    return iso_name_copy(rec_name, rec_name_len, out, out_size);
 }
 
 static int iso_read_pvd_root(int device_id, struct iso_dir_loc *out_root, u32 *out_volume_sectors) {
@@ -199,7 +303,7 @@ static int iso_find_child(int device_id, const struct iso_dir_loc *dir, const ch
         rec_name = &rec[33];
 
         if (!(name_len == 1u && (rec_name[0] == 0u || rec_name[0] == 1u))) {
-            if (iso_name_matches(rec_name, name_len, name)) {
+            if (iso_record_name_matches(rec, rec_len, rec_name, name_len, name)) {
                 out_child->extent_lba = read_u32_le(&rec[2]);
                 out_child->size = read_u32_le(&rec[10]);
                 out_child->flags = rec[25];
@@ -420,7 +524,7 @@ static int iso_list_dir(int device_id, const struct iso_dir_loc *dir, enum conso
         name_len = rec[32];
         rec_name = &rec[33];
         if (!(name_len == 1u && (rec_name[0] == 0u || rec_name[0] == 1u))) {
-            (void)iso_name_copy(rec_name, name_len, name, sizeof(name));
+            (void)iso_record_name_copy(rec, rec_len, rec_name, name_len, name, sizeof(name));
             fs_print_list_entry(target, name, (rec[25] & 0x02u) != 0u);
         }
 
@@ -467,7 +571,7 @@ static int iso_list_dir_entries(int device_id, const struct iso_dir_loc *dir, st
         if (!(name_len == 1u && (rec_name[0] == 0u || rec_name[0] == 1u))) {
             if (count < max_entries) {
                 struct fs_dir_entry *e = &entries[count];
-                (void)iso_name_copy(rec_name, name_len, e->name, sizeof(e->name));
+                (void)iso_record_name_copy(rec, rec_len, rec_name, name_len, e->name, sizeof(e->name));
                 e->is_dir = ((rec[25] & 0x02u) != 0u);
                 ++count;
             }
@@ -482,6 +586,7 @@ static int iso_list_dir_entries(int device_id, const struct iso_dir_loc *dir, st
 
 int fs_mount(const char *path, const char *fs_name, int device_id) {
     struct mount_entry *entry;
+    const struct fs_ops *ops = fs_ops_for_name(fs_name);
 
     if (!path || !fs_name || mounts_used >= MAX_MOUNTS || !is_known_fs(fs_name)) {
         return 0;
@@ -498,6 +603,7 @@ int fs_mount(const char *path, const char *fs_name, int device_id) {
     str_copy(entry->path, path, sizeof(entry->path));
     str_copy(entry->fs_name, fs_name, sizeof(entry->fs_name));
     entry->device_id = device_id;
+    entry->ops = ops;
     ++mounts_used;
     return 1;
 }
@@ -539,64 +645,80 @@ int fs_read_file_from_mount(const char *mount_path, const char *path, char **out
     if (!m || !path || !out_data || !out_size || m->device_id < 0) {
         return 0;
     }
-    if (str_eq(m->fs_name, "iso9660")) {
-        return iso_read_file_alloc(m->device_id, path, out_data, out_size);
+    if (m->ops && m->ops->read_file) {
+        return m->ops->read_file(m->device_id, path, out_data, out_size);
     }
     return 0;
 }
 
 int fs_list_dir_from_mount(const char *mount_path, const char *path, enum console_target target) {
     const struct mount_entry *m = find_mount(mount_path);
-    struct iso_dir_loc loc;
-    int is_dir = 0;
-    const char *iso_path = path ? path : "/";
-
     if (!m || m->device_id < 0) {
         return 0;
     }
-    if (!str_eq(m->fs_name, "iso9660")) {
-        return 0;
+    if (m->ops && m->ops->list_dir) {
+        return m->ops->list_dir(m->device_id, path ? path : "/", target);
     }
-    if (!iso_resolve_path(m->device_id, iso_path, &loc, &is_dir) || !is_dir) {
-        return 0;
-    }
-    return iso_list_dir(m->device_id, &loc, target);
+    return 0;
 }
 
 int fs_path_is_dir_from_mount(const char *mount_path, const char *path) {
     const struct mount_entry *m = find_mount(mount_path);
+    if (!m || m->device_id < 0) {
+        return 0;
+    }
+    if (m->ops && m->ops->path_is_dir) {
+        return m->ops->path_is_dir(m->device_id, path ? path : "/");
+    }
+    return 0;
+}
+
+int fs_list_dir_entries_from_mount(const char *mount_path, const char *path, struct fs_dir_entry *entries, u32 max_entries, u32 *out_count) {
+    const struct mount_entry *m = find_mount(mount_path);
+    if (!m || m->device_id < 0 || !entries || max_entries == 0u || !out_count) {
+        return 0;
+    }
+    if (m->ops && m->ops->list_dir_entries) {
+        return m->ops->list_dir_entries(m->device_id, path ? path : "/", entries, max_entries, out_count);
+    }
+    return 0;
+}
+
+static int iso_ops_read_file(int device_id, const char *path, char **out_data, u32 *out_size) {
+    return iso_read_file_alloc(device_id, path, out_data, out_size);
+}
+
+static int iso_ops_list_dir(int device_id, const char *path, enum console_target target) {
     struct iso_dir_loc loc;
     int is_dir = 0;
     const char *iso_path = path ? path : "/";
 
-    if (!m || m->device_id < 0) {
+    if (!iso_resolve_path(device_id, iso_path, &loc, &is_dir) || !is_dir) {
         return 0;
     }
-    if (!str_eq(m->fs_name, "iso9660")) {
-        return 0;
-    }
-    if (!iso_resolve_path(m->device_id, iso_path, &loc, &is_dir)) {
+    return iso_list_dir(device_id, &loc, target);
+}
+
+static int iso_ops_path_is_dir(int device_id, const char *path) {
+    struct iso_dir_loc loc;
+    int is_dir = 0;
+    const char *iso_path = path ? path : "/";
+
+    if (!iso_resolve_path(device_id, iso_path, &loc, &is_dir)) {
         return 0;
     }
     return is_dir;
 }
 
-int fs_list_dir_entries_from_mount(const char *mount_path, const char *path, struct fs_dir_entry *entries, u32 max_entries, u32 *out_count) {
-    const struct mount_entry *m = find_mount(mount_path);
+static int iso_ops_list_dir_entries(int device_id, const char *path, struct fs_dir_entry *entries, u32 max_entries, u32 *out_count) {
     struct iso_dir_loc loc;
     int is_dir = 0;
     const char *iso_path = path ? path : "/";
 
-    if (!m || m->device_id < 0 || !entries || max_entries == 0u || !out_count) {
+    if (!iso_resolve_path(device_id, iso_path, &loc, &is_dir) || !is_dir) {
         return 0;
     }
-    if (!str_eq(m->fs_name, "iso9660")) {
-        return 0;
-    }
-    if (!iso_resolve_path(m->device_id, iso_path, &loc, &is_dir) || !is_dir) {
-        return 0;
-    }
-    return iso_list_dir_entries(m->device_id, &loc, entries, max_entries, out_count);
+    return iso_list_dir_entries(device_id, &loc, entries, max_entries, out_count);
 }
 
 void fs_init(void) {
