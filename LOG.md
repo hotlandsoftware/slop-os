@@ -61,3 +61,17 @@ New session
 - Added the first filesystem dispatch boundary via `fs_ops` tables on mounts, so VFS/mount helpers now call filesystem operations through an interface instead of hardcoding ISO9660 checks everywhere.
 - Added the first exec/loader boundary split: ELF parsing/validation now builds an `exec_load_plan`, and process startup consumes that plan separately. (ELF path still runs in kernel, but policy and mechanism are now separated enough to support later service-style refactors.)
 - Fixed a bug where binary names were truncated to 8 characters.
+
+### Day 6
+- Added cooperative user-task save/resume via `yield`, including saved Ring 3 register state and a resumable user-mode entry path.
+- Moved user process run/resume ownership out of `exec.c` and into the task layer, so user-task lifecycle is now managed through task state transitions instead of a one-off exec loop.
+- ELF tasks now keep their real command names in the task/process tables
+- Separated yielded task lifetime from immediate exec cleanup: a yielded process now remains alive in the task/process tables instead of being reaped right away.
+- Added persistence for yielded user images by snapshotting/restoring the active user image, which avoids corruption when another ELF runs before a yielded task resumes.
+- Added kernel-owned auto-resume of READY yielded user tasks from the shell idle loop, so resumed user execution is no longer shell-command-driven only.
+- User tasks now carry the execution context needed for later scheduler-driven service behavior (`cwd`, output target, saved image/context).
+- Added real blocking IPC semantics
+- Cleaned up `ps` scheduler/process state reporting so the current task is marked clearly and task/proc states stay in sync better.
+- Added named services on top of IPC via a small kernel service registry and user-facing `svc_reg` / `svc_lookup` test tools.
+- Added the first real service-style split: `systeminfo` is now an IPC client, and `sysinfod` is a long-lived named service that handles system info requests.
+- Minimal libc implementation has been added, allowing VERY basic UNIX programs to run. We have a stripped down ``ed`` that works!

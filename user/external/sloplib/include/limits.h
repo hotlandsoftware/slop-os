@@ -1,0 +1,10 @@
+#ifndef SLOP_COMPAT_LIMITS_H
+#define SLOP_COMPAT_LIMITS_H
+
+#define INT_MAX 2147483647
+#define INT_MIN (-2147483647 - 1)
+#define LONG_MAX 2147483647L
+#define LONG_MIN (-2147483647L - 1L)
+#define PATH_MAX 256
+
+#endif

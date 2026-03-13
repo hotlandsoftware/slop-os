@@ -1,7 +1,5 @@
 #include "kernel.h"
 
-extern volatile u32 ring3_stop_reason;
-
 struct exec_program {
     const char *path;
     int (*entry)(int argc, char **argv, struct exec_context *ctx);
@@ -33,14 +31,65 @@ static int exec_is_elf_path(struct vfs_node *cwd, const char *path) {
            (u8)data[3] == (u8)'F';
 }
 
+static void exec_program_name_from_path(const char *path, char *out, u32 out_size) {
+    const char *name = path;
+    u32 len = 0u;
+
+    if (!out || out_size == 0u) {
+        return;
+    }
+
+    if (!path || path[0] == '\0') {
+        str_copy(out, "userprog", out_size);
+        return;
+    }
+
+    while (*path != '\0') {
+        if (*path == '/' && path[1] != '\0') {
+            name = path + 1;
+        }
+        ++path;
+    }
+
+    while (name[len] != '\0') {
+        ++len;
+    }
+    if (len > 4u &&
+        name[len - 4u] == '.' &&
+        name[len - 3u] == 'e' &&
+        name[len - 2u] == 'l' &&
+        name[len - 1u] == 'f') {
+        len -= 4u;
+    }
+
+    if (len == 0u) {
+        str_copy(out, "userprog", out_size);
+        return;
+    }
+
+    if (len + 1u > out_size) {
+        len = out_size - 1u;
+    }
+
+    {
+        u32 i;
+        for (i = 0u; i < len; ++i) {
+            out[i] = name[i];
+        }
+        out[len] = '\0';
+    }
+}
+
 static int exec_run_elf_path(const char *path, int argc, char **argv, struct exec_context *ctx) {
     const char *file_data = (const char *)0;
     u32 file_size = 0u;
     struct exec_load_plan plan;
     struct proc_image image;
+    char prog_name[16];
     int rc = -1;
     int pid;
     int ppid;
+    enum exec_stop_reason stop_reason = EXEC_STOP_NONE;
 
     ppid = task_current_pid();
     if (ppid < 0) {
@@ -56,7 +105,8 @@ static int exec_run_elf_path(const char *path, int argc, char **argv, struct exe
         return 0;
     }
 
-    pid = proc_spawn_kernel("userprog", ppid);
+    exec_program_name_from_path(path, prog_name, sizeof(prog_name));
+    pid = task_spawn_user(prog_name, ppid);
     if (pid < 0) {
         console_print(ctx->output, "run: failed to allocate process\n");
         return 0;
@@ -65,42 +115,36 @@ static int exec_run_elf_path(const char *path, int argc, char **argv, struct exe
     if (!elf_load_from_plan(pid, &plan, file_data, file_size, &image, ctx->output)) {
         (void)proc_exit(pid, -1);
         (void)proc_reap_pid(pid, (int *)0);
+        (void)task_reap_pid(pid);
         return 0;
     }
+    image.cwd = *ctx->cwd;
+    image.output = ctx->output;
     (void)proc_bind_image(pid, &image);
-    syscall_set_user_cwd(*ctx->cwd);
-    syscall_set_bootinfo(ctx->mbi, ctx->magic);
 
-    for (;;) {
-        proc_set_state(pid, PROC_RUNNING);
-        if (image.context_valid) {
-            if (!elf_resume_image(&image, pid, &rc, ctx->output)) {
-                (void)proc_exit(pid, -1);
-                (void)proc_reap_pid(pid, (int *)0);
-                return 0;
-            }
-        } else {
-            if (!elf_execute_image(&image, pid, argc, argv, &rc, ctx->output)) {
-                (void)proc_exit(pid, -1);
-                (void)proc_reap_pid(pid, (int *)0);
-                return 0;
-            }
-        }
+    if (!task_run_user_until_stop(pid, argc, argv, ctx, &rc, &stop_reason)) {
+        (void)proc_exit(pid, -1);
+        (void)proc_reap_pid(pid, (int *)0);
+        (void)task_reap_pid(pid);
+        return 0;
+    }
 
-        if (ring3_stop_reason == 1u) {
-            if (!proc_get_image(pid, &image)) {
-                (void)proc_exit(pid, -1);
-                (void)proc_reap_pid(pid, (int *)0);
-                return 0;
-            }
-            proc_set_state(pid, PROC_READY);
-            continue;
-        }
-        break;
+    if (stop_reason == EXEC_STOP_YIELDED) {
+        console_print(ctx->output, "run: yielded pid ");
+        console_print_u32_dec(ctx->output, (u32)pid);
+        console_print(ctx->output, "\n");
+        return 1;
+    }
+    if (stop_reason == EXEC_STOP_BLOCKED) {
+        console_print(ctx->output, "run: blocked pid ");
+        console_print_u32_dec(ctx->output, (u32)pid);
+        console_print(ctx->output, "\n");
+        return 1;
     }
 
     (void)proc_exit(pid, rc);
     (void)proc_reap_pid(pid, (int *)0);
+    (void)task_reap_pid(pid);
 
     return 1;
 }
@@ -192,4 +236,41 @@ int exec_run_path(const char *path, int argc, char **argv, struct exec_context *
     }
 
     return 0;
+}
+
+int exec_resume_pid(int pid, struct exec_context *ctx) {
+    int rc = -1;
+    enum exec_stop_reason stop_reason = EXEC_STOP_NONE;
+    struct proc_image image;
+
+    if (pid <= 0 || !ctx) {
+        return 0;
+    }
+    if (!proc_get_image(pid, &image) || !image.loaded || !image.context_valid) {
+        console_print(ctx->output, "resume: pid not resumable\n");
+        return 0;
+    }
+
+    if (!task_run_user_until_stop(pid, 0, (char **)0, ctx, &rc, &stop_reason)) {
+        console_print(ctx->output, "resume: failed\n");
+        return 0;
+    }
+
+    if (stop_reason == EXEC_STOP_YIELDED) {
+        console_print(ctx->output, "resume: yielded pid ");
+        console_print_u32_dec(ctx->output, (u32)pid);
+        console_print(ctx->output, "\n");
+        return 1;
+    }
+    if (stop_reason == EXEC_STOP_BLOCKED) {
+        console_print(ctx->output, "resume: blocked pid ");
+        console_print_u32_dec(ctx->output, (u32)pid);
+        console_print(ctx->output, "\n");
+        return 1;
+    }
+
+    (void)proc_exit(pid, rc);
+    (void)proc_reap_pid(pid, (int *)0);
+    (void)task_reap_pid(pid);
+    return 1;
 }

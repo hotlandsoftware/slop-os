@@ -45,6 +45,7 @@ struct elf32_phdr {
 } __attribute__((packed));
 
 static u8 user_stacks[ELF_PROC_SLOTS][ELF_STACK_SIZE];
+static u8 user_images[ELF_PROC_SLOTS][ELF_USER_IMAGE_MAX];
 static int slot_owner_pid[ELF_PROC_SLOTS];
 static int slots_initialized = 0;
 
@@ -231,6 +232,8 @@ int elf_load_from_plan(int pid, const struct exec_load_plan *plan, const char *f
     out_image->entry = plan->entry;
     out_image->user_stack_base = (u32)&user_stacks[slot][0];
     out_image->user_stack_size = ELF_STACK_SIZE;
+    out_image->cwd = (struct vfs_node *)0;
+    out_image->output = CONSOLE_VGA;
     out_image->context_valid = 0;
     mem_zero(&out_image->context, sizeof(out_image->context));
     return 1;
@@ -314,12 +317,53 @@ int elf_execute_image(const struct proc_image *image, int pid, int argc, char **
     return 1;
 }
 
+int elf_snapshot_image(int pid, const struct proc_image *image) {
+    int slot;
+    u32 i;
+
+    if (pid < 0 || !image || !image->loaded) {
+        return 0;
+    }
+    if ((image->image_base < ELF_USER_IMAGE_BASE) ||
+        (image->image_base + image->image_size) > (ELF_USER_IMAGE_BASE + ELF_USER_IMAGE_MAX)) {
+        return 0;
+    }
+
+    slot = elf_slot_for_pid(pid);
+    if (slot < 0) {
+        return 0;
+    }
+
+    for (i = 0u; i < image->image_size; ++i) {
+        user_images[slot][i] = ((u8 *)image->image_base)[i];
+    }
+    return 1;
+}
+
 int elf_resume_image(const struct proc_image *image, int pid, int *ret_value, enum console_target target) {
     int rc;
+    int slot;
+    u32 i;
 
     if (!image || !image->loaded || !image->context_valid || pid < 0) {
         console_print(target, "run: no resumable image\n");
         return 0;
+    }
+    if ((image->image_base < ELF_USER_IMAGE_BASE) ||
+        (image->image_base + image->image_size) > (ELF_USER_IMAGE_BASE + ELF_USER_IMAGE_MAX)) {
+        console_print(target, "run: image outside reserved user range\n");
+        return 0;
+    }
+
+    slot = elf_slot_for_pid(pid);
+    if (slot < 0) {
+        console_print(target, "run: no process image slot\n");
+        return 0;
+    }
+
+    mem_zero((void *)ELF_USER_IMAGE_BASE, ELF_USER_IMAGE_MAX);
+    for (i = 0u; i < image->image_size; ++i) {
+        ((u8 *)image->image_base)[i] = user_images[slot][i];
     }
 
     ring3_current_pid = (u32)pid;
@@ -329,4 +373,38 @@ int elf_resume_image(const struct proc_image *image, int pid, int *ret_value, en
         *ret_value = rc;
     }
     return 1;
+}
+
+int elf_write_to_task_memory(int pid, u32 dst, const void *src, u32 len) {
+    struct proc_image image;
+    int slot;
+    u32 i;
+
+    if (pid < 0 || !src || len == 0u || !proc_get_image(pid, &image) || !image.loaded) {
+        return 0;
+    }
+
+    slot = elf_slot_for_pid(pid);
+    if (slot < 0) {
+        return 0;
+    }
+
+    if (dst >= image.image_base && (dst + len) >= dst &&
+        (dst + len) <= (image.image_base + image.image_size)) {
+        u32 offset = dst - image.image_base;
+        for (i = 0u; i < len; ++i) {
+            user_images[slot][offset + i] = ((const u8 *)src)[i];
+        }
+        return 1;
+    }
+
+    if (dst >= image.user_stack_base && (dst + len) >= dst &&
+        (dst + len) <= (image.user_stack_base + image.user_stack_size)) {
+        for (i = 0u; i < len; ++i) {
+            ((u8 *)dst)[i] = ((const u8 *)src)[i];
+        }
+        return 1;
+    }
+
+    return 0;
 }

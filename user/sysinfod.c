@@ -1,5 +1,8 @@
 #include "sys.h"
 
+#define SYSINFO_SERVICE "sysinfo"
+#define SYSINFO_MSG_REQUEST 1u
+
 static void write_str(const char *s) {
     (void)sys_write(1, s, cstr_len(s));
 }
@@ -28,23 +31,25 @@ int main(void) {
     struct ipc_message msg;
     int pid = sys_getpid();
 
-    write_str("ipc_recv pid=");
-    write_u32((unsigned int)pid);
-    write_str("\n");
-    write_str("ipc_recv waiting...\n");
-    if (sys_ipc_recv(&msg) < 0) {
-        write_str("ipc_recv: receive failed\n");
+    if (sys_service_register(SYSINFO_SERVICE) < 0) {
+        write_str("sysinfod: register failed\n");
         return 1;
     }
 
-    write_str("ipc_recv got message: src=");
-    write_u32((unsigned int)msg.src_pid);
-    write_str(" type=");
-    write_u32(msg.type);
-    write_str(" arg1=");
-    write_u32(msg.arg1);
-    write_str(" arg2=");
-    write_u32(msg.arg2);
+    write_str("sysinfod: registered pid=");
+    write_u32((unsigned int)pid);
+    write_str(" name=");
+    write_str(SYSINFO_SERVICE);
     write_str("\n");
-    return 0;
+
+    for (;;) {
+        if (sys_ipc_recv(&msg) < 0) {
+            write_str("sysinfod: receive failed\n");
+            return 1;
+        }
+
+        if (msg.type == SYSINFO_MSG_REQUEST) {
+            (void)sys_systeminfo();
+        }
+    }
 }

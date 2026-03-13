@@ -23,6 +23,11 @@ struct ipc_message {
     unsigned int arg4;
 };
 
+struct user_stat {
+    unsigned int st_mode;
+    unsigned int st_size;
+};
+
 static inline int sys_read(int fd, char *buf, unsigned int len) {
     int ret;
     __asm__ volatile (
@@ -169,6 +174,46 @@ static inline int sys_yield(void) {
         "int $0x80"
         : "=a"(ret)
         : "a"(248)
+        : "memory");
+    return ret;
+}
+
+static inline int sys_service_register(const char *name) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(249), "b"(name)
+        : "memory");
+    return ret;
+}
+
+static inline int sys_service_lookup(const char *name) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(250), "b"(name)
+        : "memory");
+    return ret;
+}
+
+static inline int sys_stat(const char *path, struct user_stat *st) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(251), "b"(path), "c"(st)
+        : "memory");
+    return ret;
+}
+
+static inline int sys_fstat(int fd, struct user_stat *st) {
+    int ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"(252), "b"(fd), "c"(st)
         : "memory");
     return ret;
 }

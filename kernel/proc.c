@@ -43,6 +43,8 @@ void proc_init(void) {
         images[i].image_size = 0;
         images[i].user_stack_base = 0;
         images[i].user_stack_size = 0;
+        images[i].cwd = (struct vfs_node *)0;
+        images[i].output = CONSOLE_VGA;
         images[i].context_valid = 0;
         mem_zero(&images[i].context, sizeof(images[i].context));
     }
@@ -78,6 +80,8 @@ int proc_spawn_kernel(const char *name, int ppid) {
     images[slot].image_size = 0;
     images[slot].user_stack_base = 0;
     images[slot].user_stack_size = 0;
+    images[slot].cwd = (struct vfs_node *)0;
+    images[slot].output = CONSOLE_VGA;
     images[slot].context_valid = 0;
     mem_zero(&images[slot].context, sizeof(images[slot].context));
     ++used;
@@ -115,6 +119,8 @@ int proc_wait(int ppid, int *child_pid, int *exit_code) {
             images[i].image_size = 0;
             images[i].user_stack_base = 0;
             images[i].user_stack_size = 0;
+            images[i].cwd = (struct vfs_node *)0;
+            images[i].output = CONSOLE_VGA;
             images[i].context_valid = 0;
             mem_zero(&images[i].context, sizeof(images[i].context));
             if (used > 0u) {
@@ -201,6 +207,8 @@ int proc_reap_pid(int pid, int *exit_code) {
     images[slot].image_size = 0;
     images[slot].user_stack_base = 0;
     images[slot].user_stack_size = 0;
+    images[slot].cwd = (struct vfs_node *)0;
+    images[slot].output = CONSOLE_VGA;
     images[slot].context_valid = 0;
     mem_zero(&images[slot].context, sizeof(images[slot].context));
     if (used > 0u) {

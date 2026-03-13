@@ -65,15 +65,19 @@ static void shell_print_help(struct shell_context *ctx) {
     console_print(ctx->output, "  cd PATH    - change directory (shell builtin)\n");
     console_print(ctx->output, "  dir [PATH] - list directory (shell builtin)\n");
     console_print(ctx->output, "  file PATH  - inspect file header (shell builtin)\n");
+    console_print(ctx->output, "  resume PID - resume yielded user task\n");
     console_print(ctx->output, "  alloc N    - allocate N bytes from kernel heap\n");
     console_print(ctx->output, "  panic      - trigger kernel panic screen\n");
     console_print(ctx->output, "  reboot     - reset machine\n");
     console_print(ctx->output, "  halt       - stop CPU\n");
     console_print(ctx->output, "Program-style commands (/bin/*):\n");
     console_print(ctx->output, "  ls [PATH], pwd, mkdir PATH, touch PATH\n");
-    console_print(ctx->output, "  cat PATH, systeminfo, ps, free\n");
+    console_print(ctx->output, "  cat PATH, writetest PATH TEXT, stdiotest PATH TEXT\n");
+    console_print(ctx->output, "  systeminfo, sysinfod, ps, free\n");
     console_print(ctx->output, "  ipc_recv, ipc_send PID [TYPE] [ARG1] [ARG2]\n");
     console_print(ctx->output, "  ipc_selftest, yieldtest\n");
+    console_print(ctx->output, "  svc_reg NAME, svc_lookup NAME\n");
+    console_print(ctx->output, "    svc_reg keeps a live service task waiting on IPC\n");
     console_print(ctx->output, "  mounts, ring3test\n");
     console_print(ctx->output, "  tip: try ls /mount/cdrom and cat /mount/cdrom/...\n");
     console_print(ctx->output, "Shell builtins:\n");
@@ -162,6 +166,31 @@ static void shell_handle_file(struct shell_context *ctx, const char *arg) {
                                            ((u32)(u8)data[3] << 24));
     }
     console_print(ctx->output, "\n");
+}
+
+static void shell_handle_resume(struct shell_context *ctx, const struct multiboot_info *mbi, u32 magic, const char *arg) {
+    int ok = 0;
+    u32 pid;
+    struct exec_context exec_ctx;
+
+    arg = skip_spaces(arg);
+    if (*arg == '\0') {
+        console_print(ctx->output, "Usage: resume PID\n");
+        return;
+    }
+
+    pid = parse_u32_dec(arg, &ok);
+    if (!ok || pid == 0u) {
+        console_print(ctx->output, "resume: invalid pid\n");
+        return;
+    }
+
+    exec_ctx.output = ctx->output;
+    exec_ctx.cwd = &ctx->cwd;
+    exec_ctx.mbi = mbi;
+    exec_ctx.magic = magic;
+
+    (void)exec_resume_pid((int)pid, &exec_ctx);
 }
 
 static void shell_handle_echo(struct shell_context *ctx, char *line) {
@@ -307,6 +336,8 @@ static void shell_execute_line(struct shell_context *ctx, const struct multiboot
         shell_handle_dir(ctx, trimmed + 4);
     } else if (str_startswith(trimmed, "file ")) {
         shell_handle_file(ctx, trimmed + 5);
+    } else if (str_startswith(trimmed, "resume ")) {
+        shell_handle_resume(ctx, mbi, magic, trimmed + 7);
     } else if (str_startswith(trimmed, "cd ")) {
         shell_handle_cd(ctx, trimmed + 3);
     } else if (str_eq(trimmed, "panic")) {
@@ -358,6 +389,7 @@ void shell_loop(const struct multiboot_info *mbi, u32 magic) {
     struct shell_context vga_shell;
     struct shell_context serial_shell;
     char c;
+    int handled_input;
 
     vga_shell.output = CONSOLE_VGA;
     vga_shell.len = 0;
@@ -382,11 +414,17 @@ void shell_loop(const struct multiboot_info *mbi, u32 magic) {
     }
 
     for (;;) {
+        handled_input = 0;
         if (shell_try_get_input(CONSOLE_VGA, &c)) {
             shell_process_char(&vga_shell, mbi, magic, c);
+            handled_input = 1;
         }
         if (serial_is_ready() && shell_try_get_input(CONSOLE_SERIAL, &c)) {
             shell_process_char(&serial_shell, mbi, magic, c);
+            handled_input = 1;
+        }
+        if (!handled_input && task_resume_next_ready_user(mbi, magic)) {
+            continue;
         }
         cpu_relax_wait();
     }

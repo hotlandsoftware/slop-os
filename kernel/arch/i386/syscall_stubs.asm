@@ -88,8 +88,18 @@ syscall_stub:
     add esp, 24
 
 .normal_return:
+    cmp eax, -512
+    je .return_blocked
     mov [esp + 28], eax
     popad
     iretd
+
+.return_blocked:
+    push esp
+    call syscall_save_yield_context
+    add esp, 4
+    mov dword [ring3_exit_code], 0
+    mov dword [ring3_stop_reason], 3
+    jmp .return_to_kernel
 
 section .note.GNU-stack noalloc noexec nowrite progbits

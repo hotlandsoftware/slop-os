@@ -41,11 +41,17 @@ KERNEL_ARCH_C_SRCS := $(wildcard $(ARCH_DIR)/*.c)
 KERNEL_C_SRCS := $(KERNEL_GENERIC_C_SRCS) $(KERNEL_ARCH_C_SRCS)
 KERNEL_C_OBJ := $(patsubst $(KERNEL_DIR)/%.c,$(OBJ_DIR)/%.o,$(KERNEL_C_SRCS))
 
-USER_PROGS := cat touch ls pwd mkdir ps systeminfo free ipc_recv ipc_send ipc_selftest yieldtest
+USER_PROGS := cat touch ls pwd mkdir ps systeminfo sysinfod free ipc_recv ipc_send ipc_selftest yieldtest svc_reg svc_lookup writetest stdiotest
 USER_CRT0_OBJ := $(USER_BUILD_DIR)/crt0.o
 USER_PROG_OBJ := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .o,$(USER_PROGS)))
 USER_PROG_ELF := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .elf,$(USER_PROGS)))
 ISO_USER_BIN := $(addprefix $(ISO_ROOT)/bin/,$(USER_PROGS))
+USER_SLOPLIB_SRCS := $(wildcard user/external/sloplib/*.c)
+USER_SLOPLIB_OBJ := $(patsubst user/external/sloplib/%.c,$(USER_BUILD_DIR)/sloplib/%.o,$(USER_SLOPLIB_SRCS))
+STDIOTEST_SLOPLIB_OBJ := $(USER_BUILD_DIR)/sloplib/slop_alloc.o $(USER_BUILD_DIR)/sloplib/slop_stdio.o
+PREBUILT_USER_DIR := third_party/prebuilt
+PREBUILT_USER_ELF := $(wildcard $(PREBUILT_USER_DIR)/*.elf)
+ISO_PREBUILT_BIN := $(patsubst $(PREBUILT_USER_DIR)/%.elf,$(ISO_ROOT)/bin/%,$(PREBUILT_USER_ELF))
 
 ifeq ($(OS),Windows_NT)
 SHELL := cmd
@@ -82,8 +88,15 @@ $(USER_CRT0_OBJ): user/crt0.asm | $(USER_BUILD_DIR)
 $(USER_BUILD_DIR)/%.o: user/%.c | $(USER_BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -c -o $@ $<
 
+$(USER_BUILD_DIR)/sloplib/%.o: user/external/sloplib/%.c | $(USER_BUILD_DIR)
+	$(call MKDIR_P,$(dir $@))
+	$(CC) $(USER_CFLAGS) -c -o $@ $<
+
 $(USER_BUILD_DIR)/%.elf: $(USER_CRT0_OBJ) $(USER_BUILD_DIR)/%.o user/linker.ld | $(USER_BUILD_DIR)
 	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_BUILD_DIR)/$*.o
+
+$(USER_BUILD_DIR)/stdiotest.elf: $(USER_CRT0_OBJ) $(USER_BUILD_DIR)/stdiotest.o $(STDIOTEST_SLOPLIB_OBJ) user/linker.ld | $(USER_BUILD_DIR)
+	$(LD) $(USER_LDFLAGS) -o $@ $(USER_CRT0_OBJ) $(USER_BUILD_DIR)/stdiotest.o $(STDIOTEST_SLOPLIB_OBJ)
 
 $(ISO_ROOT)/bin/%: $(USER_BUILD_DIR)/%.elf | $(BUILD_DIR)
 	$(call MKDIR_P,$(ISO_ROOT)/bin)
@@ -95,13 +108,17 @@ $(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD
 $(KERNEL_FB_ELF): $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ) linker.ld | $(BUILD_DIR)
 	$(LD) $(LDFLAGS) -o $@ $(BOOT_FB_OBJ) $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJ)
 
-$(ISO_IMAGE): $(KERNEL_ELF) iso/boot/grub/grub.cfg $(ISO_USER_BIN) | $(BUILD_DIR)
+$(ISO_ROOT)/bin/%: $(PREBUILT_USER_DIR)/%.elf | $(BUILD_DIR)
+	$(call MKDIR_P,$(ISO_ROOT)/bin)
+	$(call COPY_FILE,$<,$@)
+
+$(ISO_IMAGE): $(KERNEL_ELF) iso/boot/grub/grub.cfg $(ISO_USER_BIN) $(ISO_PREBUILT_BIN) | $(BUILD_DIR)
 	$(call MKDIR_P,$(ISO_ROOT)/boot/grub)
 	$(call COPY_FILE,$(KERNEL_ELF),$(ISO_ROOT)/boot/slop-kernel.elf)
 	$(call COPY_FILE,iso/boot/grub/grub.cfg,$(ISO_ROOT)/boot/grub/grub.cfg)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_ROOT)
 
-$(ISO_FB_IMAGE): $(KERNEL_FB_ELF) iso/boot/grub/grub_fb.cfg $(ISO_USER_BIN) | $(BUILD_DIR)
+$(ISO_FB_IMAGE): $(KERNEL_FB_ELF) iso/boot/grub/grub_fb.cfg $(ISO_USER_BIN) $(ISO_PREBUILT_BIN) | $(BUILD_DIR)
 	$(call MKDIR_P,$(ISO_ROOT)/boot/grub)
 	$(call COPY_FILE,$(KERNEL_FB_ELF),$(ISO_ROOT)/boot/slop-kernel-fb.elf)
 	$(call COPY_FILE,iso/boot/grub/grub_fb.cfg,$(ISO_ROOT)/boot/grub/grub.cfg)

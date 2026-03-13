@@ -24,27 +24,32 @@ static void write_u32(unsigned int value) {
     }
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     struct ipc_message msg;
-    int pid = sys_getpid();
+    int pid;
 
-    write_str("ipc_recv pid=");
-    write_u32((unsigned int)pid);
-    write_str("\n");
-    write_str("ipc_recv waiting...\n");
-    if (sys_ipc_recv(&msg) < 0) {
-        write_str("ipc_recv: receive failed\n");
+    if (argc < 2) {
+        write_str("svc_reg: usage svc_reg NAME\n");
+        return 1;
+    }
+    if (sys_service_register(argv[1]) < 0) {
+        write_str("svc_reg: register failed\n");
         return 1;
     }
 
-    write_str("ipc_recv got message: src=");
-    write_u32((unsigned int)msg.src_pid);
-    write_str(" type=");
-    write_u32(msg.type);
-    write_str(" arg1=");
-    write_u32(msg.arg1);
-    write_str(" arg2=");
-    write_u32(msg.arg2);
+    pid = sys_getpid();
+    write_str("svc_reg: registered pid=");
+    write_u32((unsigned int)pid);
+    write_str(" name=");
+    write_str(argv[1]);
     write_str("\n");
+    write_str("svc_reg: waiting for ipc\n");
+
+    if (sys_ipc_recv(&msg) < 0) {
+        write_str("svc_reg: receive failed\n");
+        return 1;
+    }
+
+    write_str("svc_reg: got ipc, exiting\n");
     return 0;
 }

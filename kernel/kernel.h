@@ -121,7 +121,16 @@ enum syscall_id {
     SYS_IPC_RECV = 246,
     SYS_IPC_REPLY = 247,
     SYS_YIELD = 248,
+    SYS_SERVICE_REGISTER = 249,
+    SYS_SERVICE_LOOKUP = 250,
+    SYS_STAT = 251,
+    SYS_FSTAT = 252,
     SYS_RET_KERNEL = 240
+};
+
+struct user_stat {
+    u32 st_mode;
+    u32 st_size;
 };
 
 struct mem_info {
@@ -167,6 +176,13 @@ struct exec_context {
     struct vfs_node **cwd;
     const struct multiboot_info *mbi;
     u32 magic;
+};
+
+enum exec_stop_reason {
+    EXEC_STOP_NONE = 0,
+    EXEC_STOP_YIELDED = 1,
+    EXEC_STOP_EXITED = 2,
+    EXEC_STOP_BLOCKED = 3
 };
 
 #define EXEC_MAX_SEGMENTS 8
@@ -227,6 +243,8 @@ struct proc_image {
     u32 image_size;
     u32 user_stack_base;
     u32 user_stack_size;
+    struct vfs_node *cwd;
+    enum console_target output;
     int context_valid;
     struct user_context context;
 };
@@ -299,6 +317,10 @@ int sys_ipc_send(struct ipc_message *msg);
 int sys_ipc_recv(struct ipc_message *msg);
 int sys_ipc_reply(struct ipc_message *msg);
 int sys_yield(void);
+int sys_service_register(const char *name);
+int sys_service_lookup(const char *name);
+int sys_stat(const char *path, struct user_stat *st);
+int sys_fstat(int fd, struct user_stat *st);
 void sys_exit(int code);
 int syscall_entry(u32 num, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5);
 void syscall_set_user_cwd(struct vfs_node *cwd);
@@ -306,10 +328,15 @@ void syscall_set_bootinfo(const struct multiboot_info *mbi, u32 magic);
 
 void tasking_init(void);
 int task_spawn_kernel(const char *name, int ppid);
+int task_spawn_user(const char *name, int ppid);
 void scheduler_on_timer_tick(void);
 int task_current_pid(void);
 u32 task_count(void);
 u32 scheduler_switch_count(void);
+void task_set_state(int pid, enum task_state state);
+int task_reap_pid(int pid);
+int task_run_user_until_stop(int pid, int argc, char **argv, struct exec_context *ctx, int *out_exit_code, enum exec_stop_reason *out_stop_reason);
+int task_resume_next_ready_user(const struct multiboot_info *mbi, u32 magic);
 void task_list(enum console_target target);
 
 void proc_init(void);
@@ -328,11 +355,19 @@ void ipc_init(void);
 int ipc_send(int src_pid, int dst_pid, const struct ipc_message *msg);
 int ipc_recv(int dst_pid, struct ipc_message *out_msg);
 int ipc_reply(int src_pid, int dst_pid, const struct ipc_message *msg);
+int ipc_block_recv(int dst_pid, u32 user_msg_ptr);
+int ipc_unblock_deliver(int dst_pid, const struct ipc_message *msg);
+
+void service_init(void);
+int service_register(const char *name, int pid);
+int service_lookup(const char *name);
 
 int elf_prepare_load_plan_from_vfs(struct vfs_node *cwd, const char *path, struct exec_load_plan *out_plan, enum console_target target);
 int elf_load_from_plan(int pid, const struct exec_load_plan *plan, const char *file_data, u32 file_size, struct proc_image *out_image, enum console_target target);
 int elf_execute_image(const struct proc_image *image, int pid, int argc, char **argv, int *ret_value, enum console_target target);
+int elf_snapshot_image(int pid, const struct proc_image *image);
 int elf_resume_image(const struct proc_image *image, int pid, int *ret_value, enum console_target target);
+int elf_write_to_task_memory(int pid, u32 dst, const void *src, u32 len);
 
 void heap_init(const struct multiboot_info *mbi, u32 magic);
 void *kmalloc(size_t size);
@@ -350,6 +385,7 @@ int vfs_touch(struct vfs_node *cwd, const char *path);
 void vfs_list(struct vfs_node *cwd, const char *path, enum console_target target);
 int vfs_read_file(struct vfs_node *cwd, const char *path, const char **data, u32 *size);
 int vfs_write_file(struct vfs_node *cwd, const char *path, const char *data, u32 size);
+int vfs_stat(struct vfs_node *cwd, const char *path, struct user_stat *st);
 void vfs_get_cwd_path(struct vfs_node *cwd, char *buf, size_t size);
 
 void storage_init(void);
@@ -373,6 +409,7 @@ int fs_list_dir_entries_from_mount(const char *mount_path, const char *path, str
 
 int exec_seed_programs(void);
 int exec_run_path(const char *path, int argc, char **argv, struct exec_context *ctx);
+int exec_resume_pid(int pid, struct exec_context *ctx);
 
 void print_systeminfo(const struct multiboot_info *mbi, u32 magic);
 void shell_loop(const struct multiboot_info *mbi, u32 magic);

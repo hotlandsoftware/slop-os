@@ -24,27 +24,22 @@ static void write_u32(unsigned int value) {
     }
 }
 
-int main(void) {
-    struct ipc_message msg;
-    int pid = sys_getpid();
+int main(int argc, char **argv) {
+    int pid;
 
-    write_str("ipc_recv pid=");
-    write_u32((unsigned int)pid);
-    write_str("\n");
-    write_str("ipc_recv waiting...\n");
-    if (sys_ipc_recv(&msg) < 0) {
-        write_str("ipc_recv: receive failed\n");
+    if (argc < 2) {
+        write_str("svc_lookup: usage svc_lookup NAME\n");
         return 1;
     }
 
-    write_str("ipc_recv got message: src=");
-    write_u32((unsigned int)msg.src_pid);
-    write_str(" type=");
-    write_u32(msg.type);
-    write_str(" arg1=");
-    write_u32(msg.arg1);
-    write_str(" arg2=");
-    write_u32(msg.arg2);
+    pid = sys_service_lookup(argv[1]);
+    if (pid < 0) {
+        write_str("svc_lookup: not found\n");
+        return 1;
+    }
+
+    write_str("svc_lookup: pid=");
+    write_u32((unsigned int)pid);
     write_str("\n");
     return 0;
 }

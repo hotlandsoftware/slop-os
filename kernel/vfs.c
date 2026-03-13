@@ -437,7 +437,8 @@ int vfs_make_dir(struct vfs_node *cwd, const char *path) {
             check = abs_path;
         }
     }
-    if (check && vfs_is_bin_alias_path(check, &subpath)) {
+    if (check && (vfs_is_bin_alias_path(check, &subpath) ||
+                  vfs_is_cdrom_mount_path(check, &subpath))) {
         return 0;
     }
 
@@ -469,7 +470,8 @@ int vfs_touch(struct vfs_node *cwd, const char *path) {
             check = abs_path;
         }
     }
-    if (check && vfs_is_bin_alias_path(check, &subpath)) {
+    if (check && (vfs_is_bin_alias_path(check, &subpath) ||
+                  vfs_is_cdrom_mount_path(check, &subpath))) {
         return 0;
     }
 
@@ -592,7 +594,8 @@ int vfs_write_file(struct vfs_node *cwd, const char *path, const char *data, u32
             check = abs_path;
         }
     }
-    if (check && vfs_is_bin_alias_path(check, &subpath)) {
+    if (check && (vfs_is_bin_alias_path(check, &subpath) ||
+                  vfs_is_cdrom_mount_path(check, &subpath))) {
         return 0;
     }
 
@@ -622,6 +625,70 @@ int vfs_write_file(struct vfs_node *cwd, const char *path, const char *data, u32
     node->data = copy;
     node->size = size;
     return 1;
+}
+
+int vfs_stat(struct vfs_node *cwd, const char *path, struct user_stat *st) {
+    char abs_path[VFS_PATH_MAX];
+    const char *check = path;
+    const char *subpath;
+    const char *data;
+    u32 size = 0u;
+    struct vfs_node *node;
+
+    if (!st) {
+        return 0;
+    }
+    st->st_mode = 0u;
+    st->st_size = 0u;
+
+    if (check && check[0] != '/' && check[0] != '\0') {
+        char cwd_path[VFS_PATH_MAX];
+        vfs_get_cwd_path(cwd, cwd_path, sizeof(cwd_path));
+        if (vfs_path_join(abs_path, sizeof(abs_path), cwd_path, check)) {
+            check = abs_path;
+        }
+    }
+
+    if (!check || check[0] == '\0') {
+        node = cwd ? cwd : vfs_root_node;
+        if (!node) {
+            return 0;
+        }
+        st->st_mode = 0040000u;
+        st->st_size = 0u;
+        return 1;
+    }
+
+    if (vfs_is_cdrom_mount_path(check, &subpath) || vfs_is_bin_alias_path(check, &subpath)) {
+        if (fs_path_is_dir_from_mount(CDROM_MOUNT, subpath)) {
+            st->st_mode = 0040000u;
+            st->st_size = 0u;
+            return 1;
+        }
+        if (fs_read_file_from_mount(CDROM_MOUNT, subpath, (char **)&data, &size)) {
+            st->st_mode = 0100000u;
+            st->st_size = size;
+            return 1;
+        }
+        return 0;
+    }
+
+    node = vfs_resolve_from(cwd, path);
+    if (!node) {
+        return 0;
+    }
+    if (node->type == VFS_NODE_DIR) {
+        st->st_mode = 0040000u;
+        st->st_size = 0u;
+        return 1;
+    }
+    if (node->type == VFS_NODE_FILE) {
+        st->st_mode = 0100000u;
+        st->st_size = node->size;
+        return 1;
+    }
+
+    return 0;
 }
 
 void vfs_get_cwd_path(struct vfs_node *cwd, char *buf, size_t size) {
